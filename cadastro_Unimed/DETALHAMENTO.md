@@ -1,0 +1,2 @@
+* com o react hook form não é mais necessario implementar o useState(), o useForm tem como retorno uma função chamada register que faz isso , no caso o controle de mudança de estado e validação do campo 
+* sera colocado valores padrão para cada campo
