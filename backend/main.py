@@ -1,5 +1,6 @@
 # app.py
 import os
+import logging
 from datetime import datetime
 from typing import Literal, Optional
 
@@ -10,10 +11,17 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
+# 1. CONFIGURAÇÃO DO LOGGING
+# Define o formato de como os logs vão aparecer no seu terminal
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
 load_dotenv()
 
 MYSQL_USER = os.getenv("MYSQL_USER", "root")
-MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "oliv10")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "260405")
 MYSQL_HOST = os.getenv("MYSQL_HOST", "127.0.0.1")
 MYSQL_PORT = os.getenv("MYSQL_PORT", "3306")
 MYSQL_DB = os.getenv("MYSQL_DB", "unimed")
@@ -26,7 +34,17 @@ DATABASE_URL = (
     f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}"
     "?charset=utf8mb4"
 )
+
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
+
+# 2. TESTE DE CONEXÃO AO INICIAR (EARLY FAIL)
+# Verifica se o banco está respondendo no momento em que a aplicação sobe
+try:
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+        logging.info("✅ Conexão com o banco de dados estabelecida com sucesso!")
+except Exception as e:
+    logging.critical(f"❌ FALHA CRÍTICA: Não foi possível conectar ao banco de dados. Erro original: {e}")
 
 app = FastAPI(title="Credenciamento API", version="1.0.0")
 
@@ -87,8 +105,9 @@ def create_submission(data: SubmissionIn):
 
         return SubmissionOut(**row)
     except SQLAlchemyError as e:
-        # logue se quiser: print(str(e))
-        raise HTTPException(status_code=500, detail="Erro ao salvar submissão.")
+        # 3. LOGGING DO ERRO DE INSERT (Fim do erro silencioso)
+        logging.error(f"Erro ao salvar submissão no banco de dados. Detalhes técnicos: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno ao salvar submissão. Verifique os logs do servidor.")
 
 
 @app.get("/submissions", response_model=list[SubmissionOut])
@@ -97,14 +116,19 @@ def list_submissions(status: Optional[StatusType] = None):
     Lista submissões (opcionalmente filtrando por status).
     Útil para o seu frontend com filtro de status.
     """
-    with engine.begin() as conn:
-        if status:
-            rs = conn.execute(
-                text("SELECT id, protocolo, razao_social, cnpj, status FROM submissions WHERE status=:s ORDER BY id DESC"),
-                {"s": status},
-            )
-        else:
-            rs = conn.execute(
-                text("SELECT id, protocolo, razao_social, cnpj, status FROM submissions ORDER BY id DESC")
-            )
-        return [SubmissionOut(**row) for row in rs.mappings().all()]
+    try:
+        with engine.begin() as conn:
+            if status:
+                rs = conn.execute(
+                    text("SELECT id, protocolo, razao_social, cnpj, status FROM submissions WHERE status=:s ORDER BY id DESC"),
+                    {"s": status},
+                )
+            else:
+                rs = conn.execute(
+                    text("SELECT id, protocolo, razao_social, cnpj, status FROM submissions ORDER BY id DESC")
+                )
+            return [SubmissionOut(**row) for row in rs.mappings().all()]
+    except SQLAlchemyError as e:
+        # 4. LOGGING DO ERRO DE SELECT
+        logging.error(f"Erro ao consultar submissões no banco de dados. Detalhes técnicos: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno ao buscar submissões. Verifique os logs.")

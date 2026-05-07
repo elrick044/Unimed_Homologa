@@ -1,240 +1,410 @@
 import { useState } from "react";
-import { PhotoIcon, UserCircleIcon } from "@heroicons/react/24/solid";
-import { ChevronDownIcon } from "@heroicons/react/16/solid";
+import { zodResolver } from "@hookform/resolvers/zod";
+import {
+  ArrowPathIcon,
+  BuildingOffice2Icon,
+  CheckCircleIcon,
+  ExclamationTriangleIcon,
+  LockClosedIcon,
+} from "@heroicons/react/24/outline";
 import { motion } from "framer-motion";
+import { useForm } from "react-hook-form";
+import { useNavigate } from "react-router-dom";
+import { z } from "zod";
+import { api } from "../config/api";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const MotionSection = motion.section;
 
-// Helpers de CNPJ
-const onlyDigits = (s) => s.replace(/\D/g, "");
-const formatCnpj = (v) => {
-  const d = onlyDigits(v).slice(0, 14);
-  if (d.length <= 2) return d;
-  if (d.length <= 5) return `${d.slice(0, 2)}.${d.slice(2)}`;
-  if (d.length <= 8) return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5)}`;
-  if (d.length <= 12)
-    return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8)}`;
-  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12, 14)}`;
+const onlyDigits = (value = "") => value.replace(/\D/g, "");
+
+const formatCnpj = (value = "") => {
+  const digits = onlyDigits(value).slice(0, 14);
+
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 5) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
+  if (digits.length <= 8) {
+    return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5)}`;
+  }
+  if (digits.length <= 12) {
+    return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`;
+  }
+
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(
+    8,
+    12,
+  )}-${digits.slice(12, 14)}`;
 };
 
-export default function Cadastro() {
-  // estados do formulário
-  const [razaoSocial, setRazaoSocial] = useState("");
-  const [cnpj, setCnpj] = useState("");
-  const [setor, setSetor] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [protocolo, setProtocolo] = useState("");
-  const [erro, setErro] = useState("");
+const formatPhone = (value = "") => {
+  const digits = onlyDigits(value).slice(0, 11);
 
-  // animação do card
-  const cardVariants = {
-    initial: { opacity: 0, y: 24, scale: 0.98 },
-    animate: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.5, ease: "easeOut" } },
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7, 11)}`;
+};
+
+const isValidCnpj = (value = "") => {
+  const cnpj = onlyDigits(value);
+
+  if (cnpj.length !== 14 || /^(\d)\1{13}$/.test(cnpj)) return false;
+
+  const calculateDigit = (base) => {
+    const weights = base.length === 12 ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2] : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    const sum = base.split("").reduce((total, digit, index) => total + Number(digit) * weights[index], 0);
+    const remainder = sum % 11;
+
+    return remainder < 2 ? 0 : 11 - remainder;
   };
 
-  const formInvalid =
-    razaoSocial.trim().length < 2 || onlyDigits(cnpj).length !== 14;
+  const firstDigit = calculateDigit(cnpj.slice(0, 12));
+  const secondDigit = calculateDigit(`${cnpj.slice(0, 12)}${firstDigit}`);
 
-  // envio
-  const onSubmit = async (e) => {
-    e.preventDefault();
-    if (formInvalid) return;
+  return cnpj.endsWith(`${firstDigit}${secondDigit}`);
+};
 
-    setErro("");
-    setProtocolo("");
-    setLoading(true);
+const registerSchema = z
+  .object({
+    razao_social: z.string().trim().min(2, "Informe a razao social.").max(255, "Use no maximo 255 caracteres."),
+    nome_fantasia: z.string().trim().min(2, "Informe o nome fantasia.").max(255, "Use no maximo 255 caracteres."),
+    cnpj: z.string().refine(isValidCnpj, "Informe um CNPJ valido."),
+    endereco: z.string().trim().min(5, "Informe o endereco completo."),
+    nome_responsavel: z.string().trim().min(2, "Informe o nome do responsavel.").max(255, "Use no maximo 255 caracteres."),
+    email: z.string().trim().email("Informe um e-mail valido."),
+    telefone: z.string().refine((value) => onlyDigits(value).length >= 10, "Informe um telefone valido."),
+    senha: z.string().min(8, "A senha deve ter pelo menos 8 caracteres."),
+    confirmar_senha: z.string().min(1, "Confirme a senha de acesso."),
+  })
+  .refine((data) => data.senha === data.confirmar_senha, {
+    message: "As senhas nao conferem.",
+    path: ["confirmar_senha"],
+  });
+
+const backendFieldNames = [
+  "razao_social",
+  "nome_fantasia",
+  "cnpj",
+  "endereco",
+  "nome_responsavel",
+  "email",
+  "telefone",
+  "senha",
+];
+
+const inputClass =
+  "block w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-[#009966] focus:ring-2 focus:ring-[#009966]/20 disabled:cursor-not-allowed disabled:bg-gray-100";
+
+const labelClass = "block text-sm font-medium text-gray-700";
+
+function FieldError({ message }) {
+  if (!message) return null;
+
+  return <p className="text-sm text-red-600">{message}</p>;
+}
+
+function backendMessage(value) {
+  if (Array.isArray(value)) return value.join(" ");
+  if (typeof value === "string") return value;
+  return "";
+}
+
+export default function Cadastro() {
+  const navigate = useNavigate();
+  const [feedback, setFeedback] = useState(null);
+
+  const {
+    register,
+    handleSubmit,
+    setError,
+    setValue,
+    formState: { errors, isSubmitting },
+  } = useForm({
+    resolver: zodResolver(registerSchema),
+    defaultValues: {
+      razao_social: "",
+      nome_fantasia: "",
+      cnpj: "",
+      endereco: "",
+      nome_responsavel: "",
+      email: "",
+      telefone: "",
+      senha: "",
+      confirmar_senha: "",
+    },
+  });
+
+  const setBackendErrors = (data) => {
+    let hasFieldError = false;
+
+    backendFieldNames.forEach((field) => {
+      if (data?.[field]) {
+        hasFieldError = true;
+        setError(field, { type: "server", message: backendMessage(data[field]) || "Revise este campo." });
+      }
+    });
+
+    return hasFieldError;
+  };
+
+  const onSubmit = async (data) => {
+    setFeedback(null);
+
+    const formData = {
+      razao_social: data.razao_social,
+      nome_fantasia: data.nome_fantasia,
+      cnpj: data.cnpj,
+      endereco: data.endereco,
+      nome_responsavel: data.nome_responsavel,
+      email: data.email,
+      telefone: data.telefone,
+      senha: data.senha,
+    };
+
     try {
-      const payload = {
-        razao_social: razaoSocial.trim(),
-        cnpj: formatCnpj(cnpj),
-        setor: setor || "Adulto", // envia formatado; se preferir, use onlyDigits(cnpj)
-        // status: "Em análise", // opcional: API já usa default
-      };
-
-      const resp = await fetch(`${API_URL}/submit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+      await api.post("/auth/register/prestador/", {
+        ...formData,
+        cnpj: formatCnpj(formData.cnpj),
+        telefone: formatPhone(formData.telefone),
       });
 
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        throw new Error(data.detail || data.message || "Falha no envio.");
-      }
+      setFeedback({
+        type: "success",
+        message: "Cadastro enviado com sucesso. Voce sera redirecionado para o login.",
+      });
 
-      const data = await resp.json();
-      setProtocolo(data.protocolo);
-    } catch (err) {
-      setErro(err.message || "Erro ao conectar com a API.");
-    } finally {
-      setLoading(false);
+      window.setTimeout(() => navigate("/login"), 1200);
+    } catch (error) {
+      const responseData = error.response?.data;
+      const hasFieldError = responseData && setBackendErrors(responseData);
+
+      setFeedback({
+        type: "error",
+        message: hasFieldError
+          ? "Alguns dados precisam de ajuste antes do envio."
+          : backendMessage(responseData?.detail || responseData?.non_field_errors) || "Nao foi possivel concluir o cadastro.",
+      });
     }
   };
 
   return (
-    <div className="bg-[#009966] text-white relative isolate px-6 py-24 lg:px-8 overflow-hidden">
-      {/* POLÍGONO SUPERIOR */}
-      <div
-        aria-hidden="true"
-        className="absolute inset-x-0 -top-40 -z-10 transform-gpu overflow-hidden blur-3xl sm:-top-80"
+    <main className="min-h-screen bg-slate-50 px-4 py-10 sm:px-6 lg:px-8">
+      <MotionSection
+        initial={{ opacity: 0, y: 18 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, ease: "easeOut" }}
+        className="mx-auto max-w-5xl"
       >
-        <div
-          style={{
-            clipPath:
-              "polygon(74.1% 44.1%, 100% 61.6%, 97.5% 26.9%, 85.5% 0.1%, 80.7% 2%, 72.5% 32.5%, 60.2% 62.4%, 52.4% 68.1%, 47.5% 58.3%, 45.2% 34.5%, 27.5% 76.7%, 0.1% 64.9%, 17.9% 100%, 27.6% 76.8%, 76.1% 97.7%, 74.1% 44.1%)",
-          }}
-          className="relative left-[calc(50%-11rem)] aspect-[1155/678] w-[144.5rem] -translate-x-1/2 rotate-30 bg-gradient-to-tr from-[#006F46] to-[#00C784] opacity-25 sm:left-[calc(50%-30rem)] sm:w-[288.75rem]"
-        />
-      </div>
-
-      {/* FORMULÁRIO */}
-      <motion.form
-        onSubmit={onSubmit}
-        variants={cardVariants}
-        initial="initial"
-        animate="animate"
-        whileHover={{ y: -2 }}
-        className="max-w-xl mx-auto bg-white text-gray-800 rounded-2xl shadow-xl ring-1 ring-black/5 p-8 space-y-6"
-      >
-        {/* Título */}
-        <div className="flex items-center gap-3">
-          <UserCircleIcon className="h-8 w-8 text-[#006F46]" />
-          <h2 className="text-2xl font-semibold text-[#006F46]">Cadastro</h2>
-        </div>
-
-        {/* Razão social */}
-        <div className="space-y-1.5">
-          <label htmlFor="razao" className="block text-sm font-medium text-gray-700">
-            Razão social *
-          </label>
-          <input
-            id="razao"
-            name="razao"
-            type="text"
-            value={razaoSocial}
-            onChange={(e) => setRazaoSocial(e.target.value)}
-            placeholder="Ex.: Clínica São Lucas LTDA"
-            required
-            autoComplete="organization"
-            className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#00A86B] focus:border-transparent"
-          />
-        </div>
-
-        {/* CNPJ */}
-        <div className="space-y-1.5">
-          <label htmlFor="cnpj" className="block text-sm font-medium text-gray-700">
-            CNPJ *
-          </label>
-          <input
-            id="cnpj"
-            name="cnpj"
-            type="text"
-            inputMode="numeric"
-            value={cnpj}
-            onChange={(e) => setCnpj(formatCnpj(e.target.value))}
-            placeholder="00.000.000/0001-00"
-            required
-            autoComplete="on"
-            className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#00A86B] focus:border-transparent"
-          />
-          <p className="text-xs text-gray-500">
-            Informe 14 dígitos. Ex.: <span className="font-mono">12.345.678/0001-90</span>
+        <div className="mb-8 max-w-3xl">
+          <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[#009966]/20 bg-white px-3 py-1 text-sm font-medium text-[#006F46] shadow-sm">
+            <BuildingOffice2Icon className="h-4 w-4" />
+            Homologacao de prestadores
+          </div>
+          <h1 className="text-3xl font-semibold tracking-normal text-gray-950 sm:text-4xl">
+            Cadastro publico do prestador
+          </h1>
+          <p className="mt-3 max-w-2xl text-base text-gray-600">
+            Informe os dados da empresa e do responsavel para iniciar o processo de homologacao.
           </p>
         </div>
 
-        {/* Setor (UI apenas) */}
-        <div className="space-y-1.5">
-          <label htmlFor="setor" className="block text-sm font-medium text-gray-700">
-            Setor
-          </label>
-          <div className="relative">
-            <select
-              id="setor"
-              name="setor"
-              value={setor}
-              onChange={(e) => setSetor(e.target.value)}
-              className="block w-full appearance-none rounded-lg border border-gray-300 bg-white px-3 py-2 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-[#00A86B] focus:border-transparent"
+        <form
+          onSubmit={handleSubmit(onSubmit)}
+          className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm sm:p-6 lg:p-8"
+          noValidate
+        >
+          <div className="grid gap-5 md:grid-cols-2">
+            <div className="space-y-2">
+              <label htmlFor="razao_social" className={labelClass}>
+                Razao social
+              </label>
+              <input
+                id="razao_social"
+                type="text"
+                autoComplete="organization"
+                className={inputClass}
+                disabled={isSubmitting}
+                {...register("razao_social")}
+              />
+              <FieldError message={errors.razao_social?.message} />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="nome_fantasia" className={labelClass}>
+                Nome fantasia
+              </label>
+              <input
+                id="nome_fantasia"
+                type="text"
+                autoComplete="organization-title"
+                className={inputClass}
+                disabled={isSubmitting}
+                {...register("nome_fantasia")}
+              />
+              <FieldError message={errors.nome_fantasia?.message} />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="cnpj" className={labelClass}>
+                CNPJ
+              </label>
+              <input
+                id="cnpj"
+                type="text"
+                inputMode="numeric"
+                placeholder="00.000.000/0000-00"
+                className={inputClass}
+                disabled={isSubmitting}
+                {...register("cnpj")}
+                onChange={(event) => {
+                  setValue("cnpj", formatCnpj(event.target.value), { shouldDirty: true, shouldValidate: true });
+                }}
+              />
+              <FieldError message={errors.cnpj?.message} />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="telefone" className={labelClass}>
+                Telefone
+              </label>
+              <input
+                id="telefone"
+                type="tel"
+                inputMode="tel"
+                placeholder="(11) 99999-9999"
+                autoComplete="tel"
+                className={inputClass}
+                disabled={isSubmitting}
+                {...register("telefone")}
+                onChange={(event) => {
+                  setValue("telefone", formatPhone(event.target.value), { shouldDirty: true, shouldValidate: true });
+                }}
+              />
+              <FieldError message={errors.telefone?.message} />
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              <label htmlFor="endereco" className={labelClass}>
+                Endereco
+              </label>
+              <input
+                id="endereco"
+                type="text"
+                autoComplete="street-address"
+                className={inputClass}
+                disabled={isSubmitting}
+                {...register("endereco")}
+              />
+              <FieldError message={errors.endereco?.message} />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="nome_responsavel" className={labelClass}>
+                Nome do responsavel
+              </label>
+              <input
+                id="nome_responsavel"
+                type="text"
+                autoComplete="name"
+                className={inputClass}
+                disabled={isSubmitting}
+                {...register("nome_responsavel")}
+              />
+              <FieldError message={errors.nome_responsavel?.message} />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="email" className={labelClass}>
+                E-mail
+              </label>
+              <input
+                id="email"
+                type="email"
+                autoComplete="email"
+                className={inputClass}
+                disabled={isSubmitting}
+                {...register("email")}
+              />
+              <FieldError message={errors.email?.message} />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="senha" className={labelClass}>
+                Senha de acesso
+              </label>
+              <div className="relative">
+                <LockClosedIcon className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+                <input
+                  id="senha"
+                  type="password"
+                  autoComplete="new-password"
+                  className={`${inputClass} pl-10`}
+                  disabled={isSubmitting}
+                  {...register("senha")}
+                />
+              </div>
+              <FieldError message={errors.senha?.message} />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="confirmar_senha" className={labelClass}>
+                Confirmacao de senha
+              </label>
+              <div className="relative">
+                <LockClosedIcon className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+                <input
+                  id="confirmar_senha"
+                  type="password"
+                  autoComplete="new-password"
+                  className={`${inputClass} pl-10`}
+                  disabled={isSubmitting}
+                  {...register("confirmar_senha")}
+                />
+              </div>
+              <FieldError message={errors.confirmar_senha?.message} />
+            </div>
+          </div>
+
+          {feedback && (
+            <div
+              className={`mt-6 flex items-start gap-3 rounded-lg border px-4 py-3 text-sm ${
+                feedback.type === "success"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : "border-red-200 bg-red-50 text-red-700"
+              }`}
+              role="alert"
             >
-              <option value="">Selecione um setor</option>
-              <option>Adulto</option>
-              <option>Infantil</option>
-              <option>Obstétrico</option>
-              <option>Ortopedia</option>
-            </select>
-            <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+              {feedback.type === "success" ? (
+                <CheckCircleIcon className="mt-0.5 h-5 w-5 shrink-0" />
+              ) : (
+                <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 shrink-0" />
+              )}
+              <span>{feedback.message}</span>
+            </div>
+          )}
+
+          <div className="mt-8 flex flex-col-reverse gap-3 border-t border-gray-200 pt-6 sm:flex-row sm:items-center sm:justify-end">
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={() => navigate("/")}
+              className="inline-flex min-h-11 items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#006F46] px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#00583C] focus:outline-none focus:ring-2 focus:ring-[#009966] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {isSubmitting && <ArrowPathIcon className="h-4 w-4 animate-spin" />}
+              {isSubmitting ? "Enviando cadastro" : "Confirmar cadastro"}
+            </button>
           </div>
-        </div>
-
-        {/* Upload (mock visual) */}
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700">Anexo (opcional)</label>
-          <div className="flex items-center justify-center gap-3 rounded-lg border border-dashed border-gray-300 p-4">
-            <PhotoIcon className="h-7 w-7 text-gray-400" />
-            <span className="text-sm text-gray-500">Em breve: envio de arquivos</span>
-          </div>
-        </div>
-
-        {/* feedback */}
-        {erro && (
-          <div className="rounded-lg bg-red-50 text-red-700 text-sm px-3 py-2" role="alert">
-            {erro}
-          </div>
-        )}
-
-        {protocolo && (
-          <motion.div
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="rounded-lg bg-emerald-50 text-emerald-800 text-sm px-3 py-2"
-          >
-            Protocolo gerado: <span className="font-semibold">{protocolo}</span>
-          </motion.div>
-        )}
-
-        {/* Ações */}
-        <div className="flex items-center justify-end gap-3 pt-2">
-          <motion.button
-            type="button"
-            whileTap={{ scale: 0.98 }}
-            onClick={() => {
-              setRazaoSocial("");
-              setCnpj("");
-              setSetor("");
-              setErro("");
-              setProtocolo("");
-            }}
-            className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100"
-          >
-            Cancelar
-          </motion.button>
-
-          <motion.button
-            type="submit"
-            disabled={loading || formInvalid}
-            whileHover={{ y: loading || formInvalid ? 0 : -1 }}
-            whileTap={{ scale: loading || formInvalid ? 1 : 0.98 }}
-            transition={{ type: "spring", stiffness: 500, damping: 30 }}
-            className={`rounded-lg bg-[#006F46] px-4 py-2 text-sm font-semibold text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#00A86B]
-              ${loading || formInvalid ? "opacity-60 cursor-not-allowed" : "hover:bg-[#00583C]"}`}
-          >
-            {loading ? "Enviando..." : "Enviar"}
-          </motion.button>
-        </div>
-      </motion.form>
-
-      {/* POLÍGONO INFERIOR */}
-      <div
-        aria-hidden="true"
-        className="absolute inset-x-0 bottom-0 -z-10 transform-gpu overflow-hidden blur-3xl"
-      >
-        <div
-          style={{
-            clipPath:
-              "polygon(74.1% 44.1%, 100% 61.6%, 97.5% 26.9%, 85.5% 0.1%, 80.7% 2%, 72.5% 32.5%, 60.2% 62.4%, 52.4% 68.1%, 47.5% 58.3%, 45.2% 34.5%, 27.5% 76.7%, 0.1% 64.9%, 17.9% 100%, 27.6% 76.8%, 76.1% 97.7%, 74.1% 44.1%)",
-          }}
-          className="relative left-1/2 aspect-[1155/678] w-[144.5rem] -translate-x-1/2 bg-gradient-to-tr from-[#006F46] to-[#00C784] opacity-25 sm:w-[288.75rem]"
-        />
-      </div>
-    </div>
+        </form>
+      </MotionSection>
+    </main>
   );
 }
