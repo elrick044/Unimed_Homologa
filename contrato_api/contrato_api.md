@@ -15,11 +15,16 @@ Endpoints publicos atuais:
 - `POST /api/auth/register/prestador/`
 - `POST /api/auth/login/`
 
-Endpoints autenticados futuros devem enviar o token de acesso no header:
+Endpoints autenticados devem enviar o token de acesso no header:
 
 ```http
 Authorization: Bearer <access_token>
 ```
+
+Endpoints autenticados atuais:
+
+- `GET /api/documentos/tipos/`
+- `POST /api/documentos/upload/`
 
 ## POST /api/auth/register/prestador/
 
@@ -144,6 +149,199 @@ Exemplo:
 }
 ```
 
+## POST /api/documentos/upload/
+
+Recebe um ou mais documentos PDF do prestador autenticado e salva os arquivos no storage padrao do Django, em `media/documentos/`.
+
+Requer autenticacao JWT de usuario com perfil `PRESTADOR`.
+
+### Headers
+
+```http
+Authorization: Bearer <access_token>
+Content-Type: multipart/form-data
+```
+
+### Request com um documento
+
+Campos multipart:
+
+| Campo | Tipo | Obrigatorio | Regra |
+| --- | --- | --- | --- |
+| `arquivo` | file | Sim | Arquivo PDF com `Content-Type: application/pdf`, extensao `.pdf` e assinatura `%PDF` |
+| `tipo_documento` | integer | Sim | ID de um `TipoDocumento` ativo |
+
+Exemplo conceitual:
+
+```text
+arquivo=<contrato.pdf>
+tipo_documento=1
+```
+
+### Request com multiplos documentos
+
+Campos multipart repetidos:
+
+| Campo | Tipo | Obrigatorio | Regra |
+| --- | --- | --- | --- |
+| `arquivos` | file[] | Sim | Um ou mais arquivos PDF com `Content-Type: application/pdf`, extensao `.pdf` e assinatura `%PDF` |
+| `tipos_documento` | integer[] | Sim | Um tipo para cada arquivo, na mesma ordem |
+
+Exemplo conceitual:
+
+```text
+arquivos=<contrato.pdf>
+tipos_documento=1
+arquivos=<comprovante-endereco.pdf>
+tipos_documento=2
+```
+
+### Response 201
+
+```json
+{
+  "documentos": [
+    {
+      "id": 10,
+      "tipo_documento": {
+        "id": 1,
+        "nome": "Contrato Social",
+        "descricao": "",
+        "obrigatorio": true,
+        "ativo": true,
+        "criado_em": "2026-05-07T20:30:00Z",
+        "atualizado_em": "2026-05-07T20:30:00Z"
+      },
+      "arquivo": "/media/documentos/contrato.pdf",
+      "content_type": "application/pdf",
+      "tamanho_bytes": 123456,
+      "enviado_em": "2026-05-07T20:35:00Z"
+    }
+  ]
+}
+```
+
+### Response 400
+
+Arquivo ausente:
+
+```json
+{
+  "arquivos": [
+    "Envie ao menos um arquivo PDF."
+  ]
+}
+```
+
+Arquivo que nao seja PDF:
+
+```json
+{
+  "arquivos": [
+    "O arquivo contrato.txt deve ser um PDF."
+  ]
+}
+```
+
+Quantidade de arquivos diferente da quantidade de tipos:
+
+```json
+{
+  "tipos_documento": [
+    "Informe um tipo de documento para cada arquivo enviado."
+  ]
+}
+```
+
+Tipo de documento invalido ou inativo:
+
+```json
+{
+  "tipos_documento": [
+    "Tipo de documento invalido ou inativo."
+  ]
+}
+```
+
+### Response 401
+
+Retornado quando o token JWT esta ausente, invalido ou expirado.
+
+### Response 403
+
+Retornado quando o usuario autenticado nao possui perfil `PRESTADOR` ou nao possui cadastro de prestador vinculado.
+
+Exemplo:
+
+```json
+{
+  "detail": "Apenas prestadores podem enviar documentos."
+}
+```
+
+### Observabilidade
+
+O backend registra logs estruturados para:
+
+- `document_upload_success`
+- `document_upload_invalid_format`
+- `document_upload_size_anomaly`
+- `document_upload_validation_failed`
+- `document_upload_forbidden_profile`
+- `document_upload_missing_prestador`
+
+## GET /api/documentos/tipos/
+
+Lista os tipos de documentos ativos que podem ser usados no upload.
+
+Requer autenticacao JWT.
+
+### Headers
+
+```http
+Authorization: Bearer <access_token>
+```
+
+### Response 200
+
+```json
+{
+  "tipos_documento": [
+    {
+      "id": 1,
+      "nome": "Contrato Social",
+      "descricao": "Documento de constituicao da empresa.",
+      "obrigatorio": true,
+      "ativo": true,
+      "criado_em": "2026-05-07T20:30:00Z",
+      "atualizado_em": "2026-05-07T20:30:00Z"
+    },
+    {
+      "id": 2,
+      "nome": "Comprovante de Endereco",
+      "descricao": "Comprovante atualizado do endereco informado.",
+      "obrigatorio": true,
+      "ativo": true,
+      "criado_em": "2026-05-07T20:30:00Z",
+      "atualizado_em": "2026-05-07T20:30:00Z"
+    }
+  ]
+}
+```
+
+### Tipos padrao
+
+A migracao inicial de dados cria os seguintes tipos ativos:
+
+- `Contrato Social`
+- `Comprovante de Endereco`
+- `Alvara de Funcionamento`
+- `Certidao Negativa`
+
+### Response 401
+
+Retornado quando o token JWT esta ausente, invalido ou expirado.
+
 ## Modelos Base
 
 ### Usuario
@@ -168,3 +366,25 @@ Exemplo:
 | `telefone` | Telefone de contato |
 | `criado_em` | Data de criacao |
 | `atualizado_em` | Data da ultima atualizacao |
+
+### TipoDocumento
+
+| Campo | Descricao |
+| --- | --- |
+| `nome` | Nome configuravel do documento, como `Contrato Social` |
+| `descricao` | Texto opcional de apoio |
+| `obrigatorio` | Indica se o documento e obrigatorio para homologacao |
+| `ativo` | Indica se o tipo pode ser usado em novos uploads |
+| `criado_em` | Data de criacao |
+| `atualizado_em` | Data da ultima atualizacao |
+
+### DocumentoPrestador
+
+| Campo | Descricao |
+| --- | --- |
+| `prestador` | Prestador vinculado ao documento |
+| `tipo_documento` | Tipo de documento enviado |
+| `arquivo` | Arquivo salvo em `media/documentos/` |
+| `content_type` | Tipo MIME informado no upload |
+| `tamanho_bytes` | Tamanho do arquivo em bytes |
+| `enviado_em` | Data e hora exata do envio |

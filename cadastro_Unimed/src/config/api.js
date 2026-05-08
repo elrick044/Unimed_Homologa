@@ -6,9 +6,6 @@ const baseURL = API_URL.endsWith("/api") ? API_URL : `${API_URL.replace(/\/$/, "
 
 export const api = axios.create({
   baseURL,
-  headers: {
-    "Content-Type": "application/json",
-  },
 });
 
 api.interceptors.request.use((config) => {

@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import PrestadorEmpresa, User
+from .models import DocumentoPrestador, PrestadorEmpresa, TipoDocumento, User
 
 
 @admin.register(User)
@@ -28,3 +28,17 @@ class UserAdmin(DjangoUserAdmin):
 class PrestadorEmpresaAdmin(admin.ModelAdmin):
     list_display = ('razao_social', 'cnpj', 'email', 'telefone', 'criado_em')
     search_fields = ('razao_social', 'nome_fantasia', 'cnpj', 'email')
+
+
+@admin.register(TipoDocumento)
+class TipoDocumentoAdmin(admin.ModelAdmin):
+    list_display = ('nome', 'obrigatorio', 'ativo', 'criado_em')
+    list_filter = ('obrigatorio', 'ativo')
+    search_fields = ('nome', 'descricao')
+
+
+@admin.register(DocumentoPrestador)
+class DocumentoPrestadorAdmin(admin.ModelAdmin):
+    list_display = ('prestador', 'tipo_documento', 'content_type', 'tamanho_bytes', 'enviado_em')
+    list_filter = ('tipo_documento', 'content_type', 'enviado_em')
+    search_fields = ('prestador__razao_social', 'prestador__cnpj', 'tipo_documento__nome')
