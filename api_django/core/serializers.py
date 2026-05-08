@@ -5,7 +5,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import PrestadorEmpresa, User
+from .models import DocumentoPrestador, PrestadorEmpresa, TipoDocumento, User
 
 
 CNPJ_FORMAT_RE = re.compile(r'^\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}$')
@@ -106,3 +106,27 @@ class LoginSerializer(serializers.Serializer):
 
         attrs['user'] = user
         return attrs
+
+
+class TipoDocumentoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TipoDocumento
+        fields = ('id', 'nome', 'descricao', 'obrigatorio', 'ativo', 'criado_em', 'atualizado_em')
+        read_only_fields = ('id', 'criado_em', 'atualizado_em')
+
+
+class DocumentoPrestadorSerializer(serializers.ModelSerializer):
+    tipo_documento = TipoDocumentoSerializer(read_only=True)
+    arquivo = serializers.FileField(read_only=True)
+
+    class Meta:
+        model = DocumentoPrestador
+        fields = (
+            'id',
+            'tipo_documento',
+            'arquivo',
+            'content_type',
+            'tamanho_bytes',
+            'enviado_em',
+        )
+        read_only_fields = fields

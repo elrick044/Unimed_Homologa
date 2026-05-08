@@ -79,3 +79,45 @@ class PrestadorEmpresa(models.Model):
 
     def __str__(self):
         return f'{self.razao_social} ({self.cnpj})'
+
+
+class TipoDocumento(models.Model):
+    nome = models.CharField(max_length=150, unique=True)
+    descricao = models.TextField(blank=True)
+    obrigatorio = models.BooleanField(default=True)
+    ativo = models.BooleanField(default=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Tipo de Documento'
+        verbose_name_plural = 'Tipos de Documento'
+        ordering = ('nome',)
+
+    def __str__(self):
+        return self.nome
+
+
+class DocumentoPrestador(models.Model):
+    prestador = models.ForeignKey(
+        PrestadorEmpresa,
+        on_delete=models.CASCADE,
+        related_name='documentos',
+    )
+    tipo_documento = models.ForeignKey(
+        TipoDocumento,
+        on_delete=models.PROTECT,
+        related_name='documentos_prestadores',
+    )
+    arquivo = models.FileField(upload_to='documentos/')
+    content_type = models.CharField(max_length=100)
+    tamanho_bytes = models.PositiveIntegerField()
+    enviado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Documento do Prestador'
+        verbose_name_plural = 'Documentos dos Prestadores'
+        ordering = ('-enviado_em',)
+
+    def __str__(self):
+        return f'{self.prestador.razao_social} - {self.tipo_documento.nome}'
