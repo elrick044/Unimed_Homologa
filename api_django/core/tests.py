@@ -9,7 +9,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import DocumentoPrestador, PrestadorEmpresa, TipoDocumento
+from .models import DocumentoPrestador, HistoricoProcesso, PrestadorEmpresa, ProcessoHomologacao, TipoDocumento
 
 
 class PrestadorRegisterTests(APITestCase):
@@ -33,11 +33,14 @@ class PrestadorRegisterTests(APITestCase):
 
         user = get_user_model().objects.get(email='prestador@example.com')
         prestador = PrestadorEmpresa.objects.get(user=user)
+        processo = ProcessoHomologacao.objects.get(prestador=prestador)
 
         self.assertEqual(user.perfil, get_user_model().Perfil.PRESTADOR)
         self.assertTrue(user.check_password('SenhaForte123'))
         self.assertNotEqual(user.password, 'SenhaForte123')
         self.assertEqual(prestador.cnpj, '12345678000190')
+        self.assertEqual(processo.status, ProcessoHomologacao.Status.CADASTRO_INICIADO)
+        self.assertTrue(processo.historico.filter(acao='Cadastro criado').exists())
 
     def test_register_prestador_rejects_invalid_cnpj_format(self):
         payload = {**self.payload, 'cnpj': '123'}
@@ -132,6 +135,10 @@ class DocumentoUploadTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(DocumentoPrestador.objects.count(), 1)
+        documento = DocumentoPrestador.objects.get()
+
+        self.assertEqual(documento.processo.prestador, self.prestador)
+        self.assertTrue(HistoricoProcesso.objects.filter(processo=documento.processo, acao='Documento enviado').exists())
         self.assertEqual(response.data['documentos'][0]['tipo_documento']['id'], self.tipo_documento.id)
 
     def test_upload_rejects_non_pdf_file(self):
@@ -185,6 +192,34 @@ class DocumentoUploadTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(DocumentoPrestador.objects.count(), 2)
         self.assertEqual(len(response.data['documentos']), 2)
+
+    def test_process_summary_returns_status_pending_documents_and_history(self):
+        processo = ProcessoHomologacao.objects.create(prestador=self.prestador)
+        processo.registrar_evento(acao='Cadastro criado', usuario=self.user)
+
+        response = self.client.get(reverse('prestador-processo'))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['status_atual'], ProcessoHomologacao.Status.CADASTRO_INICIADO)
+        self.assertGreaterEqual(len(response.data['pendencias']), 1)
+        self.assertEqual(response.data['documentos_enviados'], [])
+        self.assertEqual(response.data['historico'][0]['acao'], 'Cadastro criado')
+
+    def test_upload_updates_process_to_validation_when_all_required_documents_are_sent(self):
+        TipoDocumento.objects.filter(obrigatorio=True).exclude(id=self.tipo_documento.id).update(obrigatorio=False)
+        arquivo = SimpleUploadedFile('contrato.pdf', b'%PDF-1.4 conteudo', content_type='application/pdf')
+
+        response = self.client.post(
+            self.url,
+            {'arquivo': arquivo, 'tipo_documento': str(self.tipo_documento.id)},
+            format='multipart',
+        )
+
+        processo = DocumentoPrestador.objects.get().processo
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(processo.status, ProcessoHomologacao.Status.EM_VALIDACAO)
+        self.assertTrue(processo.historico.filter(acao='Status atualizado').exists())
 
     def test_list_active_document_types(self):
         TipoDocumento.objects.create(nome='Documento Inativo', ativo=False)

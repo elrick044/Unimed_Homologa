@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import DocumentoPrestador, PrestadorEmpresa, TipoDocumento, User
+from .models import DocumentoPrestador, HistoricoProcesso, PrestadorEmpresa, ProcessoHomologacao, TipoDocumento, User
 
 
 @admin.register(User)
@@ -39,6 +39,28 @@ class TipoDocumentoAdmin(admin.ModelAdmin):
 
 @admin.register(DocumentoPrestador)
 class DocumentoPrestadorAdmin(admin.ModelAdmin):
-    list_display = ('prestador', 'tipo_documento', 'content_type', 'tamanho_bytes', 'enviado_em')
+    list_display = ('prestador', 'processo', 'tipo_documento', 'content_type', 'tamanho_bytes', 'enviado_em')
     list_filter = ('tipo_documento', 'content_type', 'enviado_em')
     search_fields = ('prestador__razao_social', 'prestador__cnpj', 'tipo_documento__nome')
+
+
+class HistoricoProcessoInline(admin.TabularInline):
+    model = HistoricoProcesso
+    extra = 0
+    readonly_fields = ('acao', 'descricao', 'usuario', 'metadados', 'criado_em')
+    can_delete = False
+
+
+@admin.register(ProcessoHomologacao)
+class ProcessoHomologacaoAdmin(admin.ModelAdmin):
+    list_display = ('prestador', 'status', 'criado_em', 'atualizado_em', 'concluido_em')
+    list_filter = ('status', 'criado_em', 'atualizado_em')
+    search_fields = ('prestador__razao_social', 'prestador__cnpj')
+    inlines = (HistoricoProcessoInline,)
+
+
+@admin.register(HistoricoProcesso)
+class HistoricoProcessoAdmin(admin.ModelAdmin):
+    list_display = ('processo', 'acao', 'usuario', 'criado_em')
+    list_filter = ('acao', 'criado_em')
+    search_fields = ('processo__prestador__razao_social', 'acao', 'descricao')

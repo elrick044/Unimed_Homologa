@@ -23,6 +23,7 @@ Authorization: Bearer <access_token>
 
 Endpoints autenticados atuais:
 
+- `GET /api/prestador/processo/`
 - `GET /api/documentos/tipos/`
 - `POST /api/documentos/upload/`
 
@@ -81,6 +82,8 @@ Observacoes:
 - A senha e armazenada com hash pelo mecanismo nativo do Django.
 - O CNPJ e salvo normalizado, apenas com digitos.
 - O usuario criado recebe o perfil `PRESTADOR`.
+- Um `ProcessoHomologacao` e criado automaticamente com status `CADASTRO_INICIADO`.
+- O historico do processo recebe o evento `Cadastro criado`.
 
 ### Response 400
 
@@ -290,6 +293,110 @@ O backend registra logs estruturados para:
 - `document_upload_forbidden_profile`
 - `document_upload_missing_prestador`
 
+Observacoes:
+
+- Cada documento enviado fica vinculado ao `ProcessoHomologacao` vigente do prestador.
+- Cada documento salvo gera um evento `Documento enviado` no historico do processo.
+- Apos o upload, o backend recalcula o status do processo:
+  - `DOCUMENTACAO_PENDENTE` quando ainda existem documentos obrigatorios pendentes.
+  - `EM_VALIDACAO` quando todos os documentos obrigatorios ativos foram enviados.
+
+## GET /api/prestador/processo/
+
+Retorna o resumo completo da jornada do prestador autenticado: status atual, pendencias, documentos enviados e historico de eventos.
+
+Requer autenticacao JWT de usuario com perfil `PRESTADOR`.
+
+### Headers
+
+```http
+Authorization: Bearer <access_token>
+```
+
+### Response 200
+
+```json
+{
+  "id": 1,
+  "prestador": {
+    "id": 1,
+    "razao_social": "Clinica Exemplo LTDA",
+    "nome_fantasia": "Clinica Exemplo",
+    "cnpj": "12345678000190",
+    "endereco": "Rua Central, 100",
+    "nome_responsavel": "Maria Silva",
+    "email": "prestador@example.com",
+    "telefone": "(11) 99999-9999",
+    "criado_em": "2026-05-10T10:00:00Z",
+    "atualizado_em": "2026-05-10T10:00:00Z"
+  },
+  "status_atual": "DOCUMENTACAO_PENDENTE",
+  "criado_em": "2026-05-10T10:00:00Z",
+  "atualizado_em": "2026-05-10T10:20:00Z",
+  "concluido_em": null,
+  "pendencias": [
+    {
+      "id": 2,
+      "nome": "Comprovante de Endereco",
+      "descricao": "Comprovante atualizado do endereco informado.",
+      "obrigatorio": true,
+      "ativo": true,
+      "criado_em": "2026-05-10T10:00:00Z",
+      "atualizado_em": "2026-05-10T10:00:00Z"
+    }
+  ],
+  "documentos_enviados": [
+    {
+      "id": 10,
+      "tipo_documento": {
+        "id": 1,
+        "nome": "Contrato Social",
+        "descricao": "Documento de constituicao da empresa.",
+        "obrigatorio": true,
+        "ativo": true,
+        "criado_em": "2026-05-10T10:00:00Z",
+        "atualizado_em": "2026-05-10T10:00:00Z"
+      },
+      "arquivo": "/media/documentos/contrato.pdf",
+      "content_type": "application/pdf",
+      "tamanho_bytes": 123456,
+      "enviado_em": "2026-05-10T10:20:00Z"
+    }
+  ],
+  "historico": [
+    {
+      "id": 5,
+      "acao": "Documento enviado",
+      "descricao": "Documento Contrato Social enviado pelo prestador.",
+      "usuario_email": "prestador@example.com",
+      "metadados": {
+        "documento_id": 10,
+        "tipo_documento_id": 1,
+        "arquivo_nome": "contrato.pdf",
+        "tamanho_bytes": 123456
+      },
+      "criado_em": "2026-05-10T10:20:00Z"
+    }
+  ]
+}
+```
+
+### Response 401
+
+Retornado quando o token JWT esta ausente, invalido ou expirado.
+
+### Response 403
+
+Retornado quando o usuario autenticado nao possui perfil `PRESTADOR` ou nao possui cadastro de prestador vinculado.
+
+Exemplo:
+
+```json
+{
+  "detail": "Apenas prestadores podem consultar este processo."
+}
+```
+
 ## GET /api/documentos/tipos/
 
 Lista os tipos de documentos ativos que podem ser usados no upload.
@@ -367,6 +474,39 @@ Retornado quando o token JWT esta ausente, invalido ou expirado.
 | `criado_em` | Data de criacao |
 | `atualizado_em` | Data da ultima atualizacao |
 
+### ProcessoHomologacao
+
+| Campo | Descricao |
+| --- | --- |
+| `prestador` | Relacao 1:1 com o prestador |
+| `status` | Status formal da jornada de homologacao |
+| `criado_em` | Data de criacao do processo |
+| `atualizado_em` | Data da ultima atualizacao |
+| `concluido_em` | Data de conclusao, quando aplicavel |
+
+Status permitidos:
+
+- `CADASTRO_INICIADO`
+- `DOCUMENTACAO_PENDENTE`
+- `EM_VALIDACAO`
+- `CORRECAO_SOLICITADA`
+- `EM_APROVACAO_INTERNA`
+- `REPROVADO`
+- `APROVADO`
+- `MINUTA_GERADA`
+- `PROCESSO_CONCLUIDO`
+
+### HistoricoProcesso
+
+| Campo | Descricao |
+| --- | --- |
+| `processo` | Processo vinculado ao evento |
+| `acao` | Nome curto do evento, como `Cadastro criado` ou `Documento enviado` |
+| `descricao` | Detalhe textual opcional |
+| `usuario` | Usuario responsavel pelo evento, quando houver |
+| `metadados` | Dados estruturados do evento |
+| `criado_em` | Data e hora do evento |
+
 ### TipoDocumento
 
 | Campo | Descricao |
@@ -383,6 +523,7 @@ Retornado quando o token JWT esta ausente, invalido ou expirado.
 | Campo | Descricao |
 | --- | --- |
 | `prestador` | Prestador vinculado ao documento |
+| `processo` | Processo de homologacao vinculado ao documento |
 | `tipo_documento` | Tipo de documento enviado |
 | `arquivo` | Arquivo salvo em `media/documentos/` |
 | `content_type` | Tipo MIME informado no upload |

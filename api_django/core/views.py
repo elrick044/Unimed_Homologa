@@ -10,12 +10,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import DocumentoPrestador, TipoDocumento, User
+from .models import DocumentoPrestador, ProcessoHomologacao, TipoDocumento, User
 from .serializers import (
     DocumentoPrestadorSerializer,
     LoginSerializer,
     PrestadorEmpresaSerializer,
     PrestadorRegisterSerializer,
+    ProcessoHomologacaoResumoSerializer,
     TipoDocumentoSerializer,
     UserSessionSerializer,
 )
@@ -40,6 +41,19 @@ def is_pdf_file(uploaded_file):
     header = uploaded_file.read(4)
     uploaded_file.seek(position)
     return header == b'%PDF'
+
+
+def get_or_create_processo(prestador, usuario=None):
+    processo, created = ProcessoHomologacao.objects.get_or_create(prestador=prestador)
+
+    if created:
+        processo.registrar_evento(
+            acao='Cadastro criado',
+            descricao='Processo de homologacao criado automaticamente.',
+            usuario=usuario,
+        )
+
+    return processo
 
 
 class PrestadorRegisterView(APIView):
@@ -101,6 +115,7 @@ class DocumentoUploadView(APIView):
             log_upload_event('document_upload_missing_prestador', user_id=user.id)
             raise PermissionDenied('Usuario nao possui perfil de prestador vinculado.')
 
+        processo = get_or_create_processo(prestador, usuario=user)
         arquivos = request.FILES.getlist('arquivos') or request.FILES.getlist('arquivo')
         tipos_documento = request.data.getlist('tipos_documento') or request.data.getlist('tipo_documento')
 
@@ -168,12 +183,24 @@ class DocumentoUploadView(APIView):
             for item in documentos_para_criar:
                 documento = DocumentoPrestador.objects.create(
                     prestador=prestador,
+                    processo=processo,
                     tipo_documento=item['tipo_documento'],
                     arquivo=item['arquivo'],
                     content_type=item['content_type'],
                     tamanho_bytes=item['tamanho_bytes'],
                 )
                 documentos.append(documento)
+                processo.registrar_evento(
+                    acao='Documento enviado',
+                    descricao=f'Documento {item["tipo_documento"].nome} enviado pelo prestador.',
+                    usuario=user,
+                    metadados={
+                        'documento_id': documento.id,
+                        'tipo_documento_id': item['tipo_documento'].id,
+                        'arquivo_nome': item['arquivo'].name,
+                        'tamanho_bytes': item['tamanho_bytes'],
+                    },
+                )
 
                 log_upload_event(
                     'document_upload_success',
@@ -184,6 +211,8 @@ class DocumentoUploadView(APIView):
                     filename=item['arquivo'].name,
                     size=item['tamanho_bytes'],
                 )
+
+            processo.atualizar_status_por_documentos(usuario=user)
 
         return Response(
             {'documentos': DocumentoPrestadorSerializer(documentos, many=True).data},
@@ -198,5 +227,25 @@ class TipoDocumentoListView(APIView):
         tipos_documento = TipoDocumento.objects.filter(ativo=True).order_by('nome')
         return Response(
             {'tipos_documento': TipoDocumentoSerializer(tipos_documento, many=True).data},
+            status=status.HTTP_200_OK,
+        )
+
+
+class PrestadorProcessoView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        user = request.user
+
+        if user.perfil != User.Perfil.PRESTADOR:
+            raise PermissionDenied('Apenas prestadores podem consultar este processo.')
+
+        prestador = getattr(user, 'prestador_empresa', None)
+        if not prestador:
+            raise PermissionDenied('Usuario nao possui perfil de prestador vinculado.')
+
+        processo = get_or_create_processo(prestador, usuario=user)
+        return Response(
+            ProcessoHomologacaoResumoSerializer(processo).data,
             status=status.HTTP_200_OK,
         )

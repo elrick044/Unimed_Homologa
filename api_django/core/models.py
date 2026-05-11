@@ -98,9 +98,106 @@ class TipoDocumento(models.Model):
         return self.nome
 
 
+class ProcessoHomologacao(models.Model):
+    class Status(models.TextChoices):
+        CADASTRO_INICIADO = 'CADASTRO_INICIADO', _('Cadastro iniciado')
+        DOCUMENTACAO_PENDENTE = 'DOCUMENTACAO_PENDENTE', _('Documentacao pendente')
+        EM_VALIDACAO = 'EM_VALIDACAO', _('Em validacao')
+        CORRECAO_SOLICITADA = 'CORRECAO_SOLICITADA', _('Correcao solicitada')
+        EM_APROVACAO_INTERNA = 'EM_APROVACAO_INTERNA', _('Em aprovacao interna')
+        REPROVADO = 'REPROVADO', _('Reprovado')
+        APROVADO = 'APROVADO', _('Aprovado')
+        MINUTA_GERADA = 'MINUTA_GERADA', _('Minuta gerada')
+        PROCESSO_CONCLUIDO = 'PROCESSO_CONCLUIDO', _('Processo concluido')
+
+    prestador = models.OneToOneField(
+        PrestadorEmpresa,
+        on_delete=models.CASCADE,
+        related_name='processo_homologacao',
+    )
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.CADASTRO_INICIADO,
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    concluido_em = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        verbose_name = 'Processo de Homologacao'
+        verbose_name_plural = 'Processos de Homologacao'
+        ordering = ('-criado_em',)
+
+    def __str__(self):
+        return f'{self.prestador.razao_social} - {self.status}'
+
+    def registrar_evento(self, acao, descricao='', usuario=None, metadados=None):
+        return HistoricoProcesso.objects.create(
+            processo=self,
+            acao=acao,
+            descricao=descricao,
+            usuario=usuario,
+            metadados=metadados or {},
+        )
+
+    def atualizar_status_por_documentos(self, usuario=None):
+        documentos_obrigatorios = TipoDocumento.objects.filter(ativo=True, obrigatorio=True)
+        documentos_enviados = self.documentos.values_list('tipo_documento_id', flat=True).distinct()
+        pendencias = documentos_obrigatorios.exclude(id__in=documentos_enviados)
+        novo_status = (
+            self.Status.DOCUMENTACAO_PENDENTE
+            if pendencias.exists()
+            else self.Status.EM_VALIDACAO
+        )
+
+        if self.status != novo_status:
+            status_anterior = self.status
+            self.status = novo_status
+            self.save(update_fields=('status', 'atualizado_em'))
+            self.registrar_evento(
+                acao='Status atualizado',
+                descricao=f'Status alterado de {status_anterior} para {novo_status}.',
+                usuario=usuario,
+                metadados={'status_anterior': status_anterior, 'status_atual': novo_status},
+            )
+
+
+class HistoricoProcesso(models.Model):
+    processo = models.ForeignKey(
+        ProcessoHomologacao,
+        on_delete=models.CASCADE,
+        related_name='historico',
+    )
+    acao = models.CharField(max_length=150)
+    descricao = models.TextField(blank=True)
+    usuario = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name='eventos_processo',
+        blank=True,
+        null=True,
+    )
+    metadados = models.JSONField(default=dict, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Historico do Processo'
+        verbose_name_plural = 'Historicos dos Processos'
+        ordering = ('-criado_em',)
+
+    def __str__(self):
+        return f'{self.processo_id} - {self.acao}'
+
+
 class DocumentoPrestador(models.Model):
     prestador = models.ForeignKey(
         PrestadorEmpresa,
+        on_delete=models.CASCADE,
+        related_name='documentos',
+    )
+    processo = models.ForeignKey(
+        ProcessoHomologacao,
         on_delete=models.CASCADE,
         related_name='documentos',
     )
