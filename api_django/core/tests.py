@@ -49,11 +49,13 @@ class PrestadorRegisterTests(APITestCase):
 
 
 class LoginTests(APITestCase):
-    def test_login_returns_jwt_pair(self):
+    def test_login_returns_jwt_pair_and_user_session(self):
         get_user_model().objects.create_user(
             email='prestador@example.com',
             password='SenhaForte123',
             perfil=get_user_model().Perfil.PRESTADOR,
+            first_name='Maria',
+            last_name='Silva',
         )
 
         response = self.client.post(
@@ -65,6 +67,25 @@ class LoginTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('access', response.data)
         self.assertIn('refresh', response.data)
+        self.assertEqual(response.data['user']['email'], 'prestador@example.com')
+        self.assertEqual(response.data['user']['perfil'], get_user_model().Perfil.PRESTADOR)
+        self.assertEqual(response.data['user']['nome'], 'Maria Silva')
+
+    def test_me_returns_authenticated_user_session(self):
+        user = get_user_model().objects.create_user(
+            email='admin@example.com',
+            password='SenhaForte123',
+            perfil=get_user_model().Perfil.ADMINISTRADOR,
+        )
+        token = RefreshToken.for_user(user).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
+
+        response = self.client.get(reverse('auth-me'))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['id'], user.id)
+        self.assertEqual(response.data['email'], 'admin@example.com')
+        self.assertEqual(response.data['perfil'], get_user_model().Perfil.ADMINISTRADOR)
 
 
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp())

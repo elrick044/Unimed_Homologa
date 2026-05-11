@@ -17,6 +17,7 @@ from .serializers import (
     PrestadorEmpresaSerializer,
     PrestadorRegisterSerializer,
     TipoDocumentoSerializer,
+    UserSessionSerializer,
 )
 
 
@@ -68,7 +69,18 @@ class LoginView(APIView):
             {
                 'refresh': str(refresh),
                 'access': str(refresh.access_token),
+                'user': UserSessionSerializer(user).data,
             },
+            status=status.HTTP_200_OK,
+        )
+
+
+class MeView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        return Response(
+            UserSessionSerializer(request.user).data,
             status=status.HTTP_200_OK,
         )
 

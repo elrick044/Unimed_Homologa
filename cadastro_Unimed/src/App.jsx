@@ -3,6 +3,8 @@ import Home from "./pages/Home";
 import Cadastro from "./pages/Cadastro";
 import Login from "./pages/Login";
 import PrestadorDashboard from "./pages/PrestadorDashboard";
+import AdminProcessos from "./pages/AdminProcessos";
+import ProtectedRoute from "./components/ProtectedRoute";
 import Layout from "./layout/layout";
 
 
@@ -15,7 +17,12 @@ function App() {
           <Route path="/Cadastro" element={<Cadastro />} />
           <Route path="/cadastro" element={<Cadastro />} />
           <Route path="/login" element={<Login />} />
-          <Route path="/prestador/dashboard" element={<PrestadorDashboard />} />
+          <Route element={<ProtectedRoute allowedProfiles={["PRESTADOR"]} />}>
+            <Route path="/prestador/dashboard" element={<PrestadorDashboard />} />
+          </Route>
+          <Route element={<ProtectedRoute allowedProfiles={["EQUIPE_ADMINISTRATIVA", "ADMINISTRADOR"]} />}>
+            <Route path="/admin/processos" element={<AdminProcessos />} />
+          </Route>
         </Route>
       </Routes>
     </BrowserRouter>

@@ -108,6 +108,25 @@ class LoginSerializer(serializers.Serializer):
         return attrs
 
 
+class UserSessionSerializer(serializers.ModelSerializer):
+    nome = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ('id', 'email', 'perfil', 'nome')
+
+    def get_nome(self, obj):
+        full_name = obj.get_full_name()
+        if full_name:
+            return full_name
+
+        prestador = getattr(obj, 'prestador_empresa', None)
+        if prestador:
+            return prestador.nome_responsavel or prestador.razao_social
+
+        return obj.email
+
+
 class TipoDocumentoSerializer(serializers.ModelSerializer):
     class Meta:
         model = TipoDocumento

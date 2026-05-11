@@ -1,9 +1,8 @@
-import { ArrowRightOnRectangleIcon, ShieldCheckIcon } from "@heroicons/react/24/outline";
+import { ArrowRightOnRectangleIcon, ClipboardDocumentCheckIcon } from "@heroicons/react/24/outline";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { clearSession } from "../auth/session";
-import DocumentoUpload from "../components/DocumentoUpload";
 
-export default function PrestadorDashboard() {
+export default function AdminProcessos() {
   const navigate = useNavigate();
   const { user } = useOutletContext();
 
@@ -18,14 +17,12 @@ export default function PrestadorDashboard() {
         <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[#009966]/20 bg-white px-3 py-1 text-sm font-medium text-[#006F46] shadow-sm">
-              <ShieldCheckIcon className="h-4 w-4" />
-              Area do prestador
+              <ClipboardDocumentCheckIcon className="h-4 w-4" />
+              Processos administrativos
             </div>
-            <h1 className="text-3xl font-semibold text-gray-950">Dashboard do prestador</h1>
+            <h1 className="text-3xl font-semibold text-gray-950">Homologacao de prestadores</h1>
             <p className="mt-2 max-w-2xl text-sm text-gray-600">
-              {user?.nome
-                ? `${user.nome}, envie e acompanhe os documentos necessarios para a homologacao da empresa.`
-                : "Envie e acompanhe os documentos necessarios para a homologacao da empresa."}
+              {user?.nome || user?.email}, acompanhe os processos de homologacao dos prestadores.
             </p>
           </div>
 
@@ -39,7 +36,12 @@ export default function PrestadorDashboard() {
           </button>
         </header>
 
-        <DocumentoUpload />
+        <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-gray-950">Fila de processos</h2>
+          <p className="mt-2 text-sm text-gray-600">
+            Esta area ja esta protegida por perfil e pronta para receber a listagem operacional.
+          </p>
+        </section>
       </div>
     </main>
   );

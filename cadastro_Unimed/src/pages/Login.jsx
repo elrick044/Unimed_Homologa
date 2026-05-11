@@ -2,36 +2,11 @@ import { useState } from "react";
 import { ArrowPathIcon, EnvelopeIcon, LockClosedIcon } from "@heroicons/react/24/outline";
 import { useForm } from "react-hook-form";
 import { useNavigate } from "react-router-dom";
+import { getRedirectPath, saveSession } from "../auth/session";
 import { api } from "../config/api";
 
 const inputClass =
   "block w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-[#009966] focus:ring-2 focus:ring-[#009966]/20 disabled:cursor-not-allowed disabled:bg-gray-100";
-
-function parseJwt(token) {
-  try {
-    const base64Url = token.split(".")[1];
-    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-    const jsonPayload = decodeURIComponent(
-      window
-        .atob(base64)
-        .split("")
-        .map((char) => `%${`00${char.charCodeAt(0).toString(16)}`.slice(-2)}`)
-        .join(""),
-    );
-
-    return JSON.parse(jsonPayload);
-  } catch {
-    return {};
-  }
-}
-
-function getRedirectPath(profile) {
-  if (profile === "EQUIPE_ADMINISTRATIVA" || profile === "ADMINISTRADOR") {
-    return "/admin/processos";
-  }
-
-  return "/prestador/dashboard";
-}
 
 function getApiMessage(data) {
   if (Array.isArray(data?.non_field_errors)) return data.non_field_errors.join(" ");
@@ -67,14 +42,12 @@ export default function Login() {
         senha: formData.senha,
       });
 
-      localStorage.setItem("access_token", data.access);
-      localStorage.setItem("refresh_token", data.refresh);
-
-      const tokenPayload = parseJwt(data.access);
-      const profile = data.perfil || data.profile || tokenPayload.perfil || tokenPayload.profile || "PRESTADOR";
-
-      localStorage.setItem("user_profile", profile);
-      navigate(getRedirectPath(profile), { replace: true });
+      saveSession({
+        access: data.access,
+        refresh: data.refresh,
+        user: data.user,
+      });
+      navigate(getRedirectPath(data.user), { replace: true });
     } catch (error) {
       setErrorMessage(getApiMessage(error.response?.data));
     }
