@@ -16,6 +16,8 @@ const DEFAULT_DOCUMENT_TYPES = [
   { id: "4", nome: "Certidao Negativa" },
 ];
 
+const EMPTY_TYPE_IDS = [];
+
 function formatFileSize(bytes) {
   if (!bytes) return "0 KB";
 
@@ -43,7 +45,7 @@ function getApiMessage(data) {
 export default function DocumentoUpload({
   disabled = false,
   documentTypes: providedDocumentTypes,
-  hiddenTypeIds = [],
+  hiddenTypeIds = EMPTY_TYPE_IDS,
   onUploadSuccess,
 }) {
   const inputRef = useRef(null);

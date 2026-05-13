@@ -39,8 +39,8 @@ class TipoDocumentoAdmin(admin.ModelAdmin):
 
 @admin.register(DocumentoPrestador)
 class DocumentoPrestadorAdmin(admin.ModelAdmin):
-    list_display = ('prestador', 'processo', 'tipo_documento', 'content_type', 'tamanho_bytes', 'enviado_em')
-    list_filter = ('tipo_documento', 'content_type', 'enviado_em')
+    list_display = ('prestador', 'processo', 'tipo_documento', 'status', 'versao', 'validado_por', 'validado_em', 'enviado_em')
+    list_filter = ('status', 'tipo_documento', 'content_type', 'enviado_em', 'validado_em')
     search_fields = ('prestador__razao_social', 'prestador__cnpj', 'tipo_documento__nome')
 
 

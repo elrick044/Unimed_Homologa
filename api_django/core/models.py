@@ -143,7 +143,12 @@ class ProcessoHomologacao(models.Model):
 
     def atualizar_status_por_documentos(self, usuario=None):
         documentos_obrigatorios = TipoDocumento.objects.filter(ativo=True, obrigatorio=True)
-        documentos_enviados = self.documentos.values_list('tipo_documento_id', flat=True).distinct()
+        documentos_enviados = self.documentos.exclude(
+            status__in=(
+                DocumentoPrestador.Status.REPROVADO,
+                DocumentoPrestador.Status.SUBSTITUIDO,
+            )
+        ).values_list('tipo_documento_id', flat=True).distinct()
         pendencias = documentos_obrigatorios.exclude(id__in=documentos_enviados)
         novo_status = (
             self.Status.DOCUMENTACAO_PENDENTE
@@ -191,6 +196,13 @@ class HistoricoProcesso(models.Model):
 
 
 class DocumentoPrestador(models.Model):
+    class Status(models.TextChoices):
+        ENVIADO = 'ENVIADO', _('Enviado')
+        EM_VALIDACAO = 'EM_VALIDACAO', _('Em validacao')
+        APROVADO = 'APROVADO', _('Aprovado')
+        REPROVADO = 'REPROVADO', _('Reprovado')
+        SUBSTITUIDO = 'SUBSTITUIDO', _('Substituido')
+
     prestador = models.ForeignKey(
         PrestadorEmpresa,
         on_delete=models.CASCADE,
@@ -209,6 +221,29 @@ class DocumentoPrestador(models.Model):
     arquivo = models.FileField(upload_to='documentos/')
     content_type = models.CharField(max_length=100)
     tamanho_bytes = models.PositiveIntegerField()
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.ENVIADO,
+    )
+    versao = models.PositiveIntegerField(default=1)
+    documento_anterior = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        related_name='documentos_substitutos',
+        blank=True,
+        null=True,
+    )
+    validado_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name='documentos_validados',
+        blank=True,
+        null=True,
+    )
+    validado_em = models.DateTimeField(blank=True, null=True)
+    motivo_reprovacao = models.TextField(blank=True, null=True)
+    observacoes = models.TextField(blank=True, null=True)
     enviado_em = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -4,7 +4,6 @@ import {
   ArrowRightOnRectangleIcon,
   CheckCircleIcon,
   ClockIcon,
-  DocumentTextIcon,
   ExclamationTriangleIcon,
   ShieldCheckIcon,
 } from "@heroicons/react/24/outline";
@@ -37,6 +36,24 @@ const statusTone = {
   PROCESSO_CONCLUIDO: "border-emerald-200 bg-emerald-50 text-emerald-800",
 };
 
+const documentStatusLabels = {
+  PENDENTE: "Pendente",
+  ENVIADO: "Enviado",
+  EM_VALIDACAO: "Em validacao",
+  APROVADO: "Aprovado",
+  REPROVADO: "Reprovado",
+  SUBSTITUIDO: "Substituido",
+};
+
+const documentStatusTone = {
+  PENDENTE: "border-amber-200 bg-amber-50 text-amber-800",
+  ENVIADO: "border-orange-200 bg-orange-50 text-orange-800",
+  EM_VALIDACAO: "border-yellow-200 bg-yellow-50 text-yellow-800",
+  APROVADO: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  REPROVADO: "border-red-200 bg-red-50 text-red-800",
+  SUBSTITUIDO: "border-gray-200 bg-gray-50 text-gray-600",
+};
+
 function formatDate(value) {
   if (!value) return "-";
 
@@ -57,6 +74,72 @@ function formatFileSize(bytes) {
   const size = bytes / 1024 ** index;
 
   return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function StatusBadge({ status }) {
+  return (
+    <span
+      className={`inline-flex w-fit rounded-full border px-3 py-1 text-xs font-semibold ${
+        documentStatusTone[status] || "border-gray-200 bg-gray-50 text-gray-700"
+      }`}
+    >
+      {documentStatusLabels[status] || status}
+    </span>
+  );
+}
+
+function DocumentCard({ item }) {
+  const document = item.documento;
+
+  return (
+    <li className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="font-semibold text-gray-950">{item.tipo_documento?.nome || "Documento"}</p>
+          {item.tipo_documento?.descricao && <p className="mt-1 text-sm text-gray-600">{item.tipo_documento.descricao}</p>}
+          {document && (
+            <p className="mt-2 text-sm text-gray-500">
+              {formatFileSize(document.tamanho_bytes)} - versao {document.versao || 1} - {formatDate(document.enviado_em)}
+            </p>
+          )}
+        </div>
+        <StatusBadge status={item.status} />
+      </div>
+
+      {item.status === "REPROVADO" && (
+        <div className="mt-4 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 shrink-0" />
+          <div>
+            <p className="font-semibold">Correcao solicitada</p>
+            <p className="mt-1">{document?.motivo_reprovacao || "Motivo nao informado pela equipe administrativa."}</p>
+            {document?.observacoes && <p className="mt-1 text-red-600">{document.observacoes}</p>}
+          </div>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function DocumentStatusSection({ title, icon, items, emptyText, accentClass }) {
+  const StatusIcon = icon;
+
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+      <div className="mb-4 flex items-center gap-2">
+        <StatusIcon className={`h-5 w-5 ${accentClass}`} />
+        <h2 className="text-lg font-semibold text-gray-950">{title}</h2>
+      </div>
+      {items.length ? (
+        <ul className="space-y-3">
+          {items.map((item) => (
+            <DocumentCard key={`${item.status}-${item.tipo_documento?.id || item.documento?.id}`} item={item} />
+          ))}
+        </ul>
+      ) : (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">{emptyText}</div>
+      )}
+    </section>
+  );
 }
 
 export default function PrestadorDashboard() {
@@ -92,25 +175,49 @@ export default function PrestadorDashboard() {
   const documentosEnviados = useMemo(() => processo?.documentos_enviados || [], [processo]);
   const pendencias = useMemo(() => processo?.pendencias || [], [processo]);
   const statusAtual = processo?.status_atual || "CADASTRO_INICIADO";
-  const isCorrection = statusAtual === "CORRECAO_SOLICITADA";
 
-  const hiddenTypeIds = useMemo(() => {
-    if (isCorrection) return [];
-    return documentosEnviados.map((documento) => documento.tipo_documento?.id).filter(Boolean);
-  }, [documentosEnviados, isCorrection]);
+  const documentItems = useMemo(() => {
+    const activeDocuments = documentosEnviados.filter((documento) => documento.status !== "SUBSTITUIDO");
+    const sentTypeIds = new Set(activeDocuments.map((documento) => String(documento.tipo_documento?.id)));
+    const pendingItems = pendencias
+      .filter((type) => !sentTypeIds.has(String(type.id)))
+      .map((type) => ({
+        tipo_documento: type,
+        documento: null,
+        status: "PENDENTE",
+      }));
+
+    const sentItems = activeDocuments.map((documento) => ({
+      tipo_documento: documento.tipo_documento,
+      documento,
+      status: documento.status || "ENVIADO",
+    }));
+
+    return [...pendingItems, ...sentItems];
+  }, [documentosEnviados, pendencias]);
+
+  const documentBuckets = useMemo(
+    () => ({
+      pendentes: documentItems.filter((item) => item.status === "PENDENTE"),
+      validacao: documentItems.filter((item) => item.status === "ENVIADO" || item.status === "EM_VALIDACAO"),
+      aprovados: documentItems.filter((item) => item.status === "APROVADO"),
+      reprovados: documentItems.filter((item) => item.status === "REPROVADO"),
+    }),
+    [documentItems],
+  );
 
   const uploadDocumentTypes = useMemo(() => {
-    const sentTypes = documentosEnviados.map((documento) => documento.tipo_documento).filter(Boolean);
     const mergedById = new Map();
 
-    [...pendencias, ...sentTypes].forEach((type) => {
+    [...documentBuckets.pendentes, ...documentBuckets.reprovados].forEach((item) => {
+      const type = item.tipo_documento;
       if (type?.id) {
         mergedById.set(String(type.id), type);
       }
     });
 
     return Array.from(mergedById.values());
-  }, [documentosEnviados, pendencias]);
+  }, [documentBuckets]);
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-10 sm:px-6 lg:px-8">
@@ -173,15 +280,15 @@ export default function PrestadorDashboard() {
                 <div className="mt-6 grid gap-3 sm:grid-cols-3">
                   <div className="rounded-lg bg-slate-50 p-4">
                     <p className="text-sm text-gray-500">Pendencias</p>
-                    <p className="mt-1 text-2xl font-semibold text-gray-950">{pendencias.length}</p>
+                    <p className="mt-1 text-2xl font-semibold text-gray-950">{documentBuckets.pendentes.length}</p>
                   </div>
                   <div className="rounded-lg bg-slate-50 p-4">
-                    <p className="text-sm text-gray-500">Enviados</p>
-                    <p className="mt-1 text-2xl font-semibold text-gray-950">{documentosEnviados.length}</p>
+                    <p className="text-sm text-gray-500">Em validacao</p>
+                    <p className="mt-1 text-2xl font-semibold text-gray-950">{documentBuckets.validacao.length}</p>
                   </div>
                   <div className="rounded-lg bg-slate-50 p-4">
-                    <p className="text-sm text-gray-500">Criado em</p>
-                    <p className="mt-1 text-sm font-semibold text-gray-950">{formatDate(processo?.criado_em)}</p>
+                    <p className="text-sm text-gray-500">Reprovados</p>
+                    <p className="mt-1 text-2xl font-semibold text-gray-950">{documentBuckets.reprovados.length}</p>
                   </div>
                 </div>
               </div>
@@ -202,59 +309,34 @@ export default function PrestadorDashboard() {
             </section>
 
             <section className="grid gap-6 lg:grid-cols-2">
-              <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-                <div className="mb-4 flex items-center gap-2">
-                  <ExclamationTriangleIcon className="h-5 w-5 text-amber-600" />
-                  <h2 className="text-lg font-semibold text-gray-950">Documentos pendentes</h2>
-                </div>
-                {pendencias.length ? (
-                  <ul className="space-y-3">
-                    {pendencias.map((documento) => (
-                      <li key={documento.id} className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                        <p className="text-sm font-semibold text-amber-950">{documento.nome}</p>
-                        {documento.descricao && <p className="mt-1 text-sm text-amber-800">{documento.descricao}</p>}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-                    <span className="inline-flex items-center gap-2">
-                      <CheckCircleIcon className="h-5 w-5" />
-                      Nenhuma pendencia obrigatoria no momento.
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-                <div className="mb-4 flex items-center gap-2">
-                  <DocumentTextIcon className="h-5 w-5 text-[#006F46]" />
-                  <h2 className="text-lg font-semibold text-gray-950">Documentos enviados</h2>
-                </div>
-                {documentosEnviados.length ? (
-                  <ul className="divide-y divide-gray-200">
-                    {documentosEnviados.map((documento) => (
-                      <li key={documento.id} className="flex items-start justify-between gap-4 py-3 text-sm">
-                        <div className="min-w-0">
-                          <p className="truncate font-semibold text-gray-950">
-                            {documento.tipo_documento?.nome || "Documento"}
-                          </p>
-                          <p className="mt-1 text-gray-500">
-                            {formatFileSize(documento.tamanho_bytes)} - {formatDate(documento.enviado_em)}
-                          </p>
-                        </div>
-                        <span className="shrink-0 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                          Recebido
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
-                    Nenhum documento foi recebido ainda.
-                  </div>
-                )}
-              </div>
+              <DocumentStatusSection
+                title="Documentos pendentes"
+                icon={ExclamationTriangleIcon}
+                items={documentBuckets.pendentes}
+                emptyText="Nenhuma pendencia obrigatoria no momento."
+                accentClass="text-amber-600"
+              />
+              <DocumentStatusSection
+                title="Em validacao"
+                icon={ClockIcon}
+                items={documentBuckets.validacao}
+                emptyText="Nenhum documento aguardando validacao."
+                accentClass="text-orange-600"
+              />
+              <DocumentStatusSection
+                title="Aprovados"
+                icon={CheckCircleIcon}
+                items={documentBuckets.aprovados}
+                emptyText="Nenhum documento aprovado ainda."
+                accentClass="text-emerald-600"
+              />
+              <DocumentStatusSection
+                title="Reprovados"
+                icon={ExclamationTriangleIcon}
+                items={documentBuckets.reprovados}
+                emptyText="Nenhum documento reprovado."
+                accentClass="text-red-600"
+              />
             </section>
 
             {processo?.historico?.length > 0 && (
@@ -277,7 +359,6 @@ export default function PrestadorDashboard() {
 
             <DocumentoUpload
               documentTypes={uploadDocumentTypes}
-              hiddenTypeIds={hiddenTypeIds}
               onUploadSuccess={loadProcesso}
             />
           </div>

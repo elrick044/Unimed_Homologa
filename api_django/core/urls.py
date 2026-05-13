@@ -2,9 +2,12 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
+    AdminDocumentoValidacaoView,
+    AdminProcessoListView,
     DocumentoUploadView,
     LoginView,
     MeView,
+    ProcessoDocumentoListView,
     PrestadorProcessoView,
     PrestadorRegisterView,
     TipoDocumentoListView,
@@ -18,4 +21,7 @@ urlpatterns = [
     path('documentos/tipos/', TipoDocumentoListView.as_view(), name='documentos-tipos'),
     path('documentos/upload/', DocumentoUploadView.as_view(), name='documentos-upload'),
     path('prestador/processo/', PrestadorProcessoView.as_view(), name='prestador-processo'),
+    path('processos/<int:id_processo>/documentos/', ProcessoDocumentoListView.as_view(), name='processo-documentos'),
+    path('admin/processos/', AdminProcessoListView.as_view(), name='admin-processos'),
+    path('admin/documentos/<int:id_documento>/validar/', AdminDocumentoValidacaoView.as_view(), name='admin-documento-validar'),
 ]

@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowPathIcon,
   ArrowRightOnRectangleIcon,
+  EyeIcon,
   ClipboardDocumentCheckIcon,
   MagnifyingGlassIcon,
 } from "@heroicons/react/24/outline";
-import { useNavigate, useOutletContext } from "react-router-dom";
+import { Link, useNavigate, useOutletContext } from "react-router-dom";
 import { clearSession } from "../auth/session";
 import { api } from "../config/api";
 
@@ -238,12 +239,15 @@ export default function AdminProcessos() {
                   <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-normal text-gray-500">
                     Status
                   </th>
+                  <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-normal text-gray-500">
+                    Acoes
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 bg-white">
                 {isLoading ? (
                   <tr>
-                    <td colSpan="4" className="px-5 py-8 text-sm text-gray-600">
+                    <td colSpan="5" className="px-5 py-8 text-sm text-gray-600">
                       <span className="inline-flex items-center gap-2">
                         <ArrowPathIcon className="h-4 w-4 animate-spin" />
                         Carregando processos...
@@ -271,11 +275,20 @@ export default function AdminProcessos() {
                           {getStatusLabel(processo.status)}
                         </span>
                       </td>
+                      <td className="whitespace-nowrap px-5 py-4 text-right text-sm">
+                        <Link
+                          to={`/admin/processos/${processo.id}`}
+                          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
+                        >
+                          <EyeIcon className="h-4 w-4" />
+                          Detalhes
+                        </Link>
+                      </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="4" className="px-5 py-8 text-sm text-gray-600">
+                    <td colSpan="5" className="px-5 py-8 text-sm text-gray-600">
                       Nenhum processo encontrado com os filtros atuais.
                     </td>
                   </tr>

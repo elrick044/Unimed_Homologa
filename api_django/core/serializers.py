@@ -143,6 +143,8 @@ class TipoDocumentoSerializer(serializers.ModelSerializer):
 class DocumentoPrestadorSerializer(serializers.ModelSerializer):
     tipo_documento = TipoDocumentoSerializer(read_only=True)
     arquivo = serializers.FileField(read_only=True)
+    documento_anterior = serializers.PrimaryKeyRelatedField(read_only=True)
+    validado_por_email = serializers.EmailField(source='validado_por.email', read_only=True)
 
     class Meta:
         model = DocumentoPrestador
@@ -152,9 +154,42 @@ class DocumentoPrestadorSerializer(serializers.ModelSerializer):
             'arquivo',
             'content_type',
             'tamanho_bytes',
+            'status',
+            'versao',
+            'documento_anterior',
+            'validado_por_email',
+            'validado_em',
+            'motivo_reprovacao',
+            'observacoes',
             'enviado_em',
         )
         read_only_fields = fields
+
+
+class DocumentoPrestadorVersaoSerializer(DocumentoPrestadorSerializer):
+    class Meta(DocumentoPrestadorSerializer.Meta):
+        fields = DocumentoPrestadorSerializer.Meta.fields
+
+
+class DocumentoPrestadorHistoricoSerializer(serializers.Serializer):
+    tipo_documento = TipoDocumentoSerializer(read_only=True)
+    documento_atual = DocumentoPrestadorVersaoSerializer(read_only=True)
+    versoes = DocumentoPrestadorVersaoSerializer(many=True, read_only=True)
+
+
+class DocumentoValidacaoSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=(
+        DocumentoPrestador.Status.APROVADO,
+        DocumentoPrestador.Status.REPROVADO,
+    ))
+    motivo_reprovacao = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    observacoes = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    def validate(self, attrs):
+        if attrs['status'] == DocumentoPrestador.Status.REPROVADO and not attrs.get('motivo_reprovacao'):
+            raise serializers.ValidationError({'motivo_reprovacao': ['Informe o motivo da reprovacao.']})
+
+        return attrs
 
 
 class HistoricoProcessoSerializer(serializers.ModelSerializer):
@@ -189,10 +224,53 @@ class ProcessoHomologacaoResumoSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_pendencias(self, obj):
-        documentos_enviados = obj.documentos.values_list('tipo_documento_id', flat=True).distinct()
+        documentos_enviados = obj.documentos.exclude(
+            status__in=(DocumentoPrestador.Status.REPROVADO, DocumentoPrestador.Status.SUBSTITUIDO)
+        ).values_list('tipo_documento_id', flat=True).distinct()
         pendencias = TipoDocumento.objects.filter(ativo=True, obrigatorio=True).exclude(id__in=documentos_enviados)
         return TipoDocumentoSerializer(pendencias, many=True).data
 
     def get_documentos_enviados(self, obj):
-        documentos = obj.documentos.select_related('tipo_documento').order_by('-enviado_em')
+        documentos = obj.documentos.exclude(
+            status=DocumentoPrestador.Status.SUBSTITUIDO
+        ).select_related('tipo_documento').order_by('-enviado_em')
         return DocumentoPrestadorSerializer(documentos, many=True).data
+
+
+class ProcessoHomologacaoListSerializer(serializers.ModelSerializer):
+    prestador = PrestadorEmpresaSerializer(read_only=True)
+    status_atual = serializers.CharField(source='status', read_only=True)
+    total_documentos = serializers.SerializerMethodField()
+    total_pendencias = serializers.SerializerMethodField()
+    ultimo_evento = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProcessoHomologacao
+        fields = (
+            'id',
+            'prestador',
+            'status_atual',
+            'total_documentos',
+            'total_pendencias',
+            'ultimo_evento',
+            'criado_em',
+            'atualizado_em',
+            'concluido_em',
+        )
+        read_only_fields = fields
+
+    def get_total_documentos(self, obj):
+        return obj.documentos.exclude(status=DocumentoPrestador.Status.SUBSTITUIDO).count()
+
+    def get_total_pendencias(self, obj):
+        documentos_enviados = obj.documentos.exclude(
+            status__in=(DocumentoPrestador.Status.REPROVADO, DocumentoPrestador.Status.SUBSTITUIDO)
+        ).values_list('tipo_documento_id', flat=True).distinct()
+        return TipoDocumento.objects.filter(ativo=True, obrigatorio=True).exclude(id__in=documentos_enviados).count()
+
+    def get_ultimo_evento(self, obj):
+        evento = obj.historico.order_by('-criado_em').first()
+        if not evento:
+            return None
+
+        return HistoricoProcessoSerializer(evento).data
