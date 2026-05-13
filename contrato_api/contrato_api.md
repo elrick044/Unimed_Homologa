@@ -23,8 +23,12 @@ Authorization: Bearer <access_token>
 
 Endpoints autenticados atuais:
 
+- `GET /api/prestador/processo/`
 - `GET /api/documentos/tipos/`
 - `POST /api/documentos/upload/`
+- `GET /api/admin/processos/`
+- `GET /api/processos/<id_processo>/documentos/`
+- `POST /api/admin/documentos/<id_documento>/validar/`
 
 ## POST /api/auth/register/prestador/
 
@@ -81,6 +85,8 @@ Observacoes:
 - A senha e armazenada com hash pelo mecanismo nativo do Django.
 - O CNPJ e salvo normalizado, apenas com digitos.
 - O usuario criado recebe o perfil `PRESTADOR`.
+- Um `ProcessoHomologacao` e criado automaticamente com status `CADASTRO_INICIADO`.
+- O historico do processo recebe o evento `Cadastro criado`.
 
 ### Response 400
 
@@ -215,6 +221,13 @@ tipos_documento=2
       "arquivo": "/media/documentos/contrato.pdf",
       "content_type": "application/pdf",
       "tamanho_bytes": 123456,
+      "status": "ENVIADO",
+      "versao": 1,
+      "documento_anterior": null,
+      "validado_por_email": null,
+      "validado_em": null,
+      "motivo_reprovacao": null,
+      "observacoes": null,
       "enviado_em": "2026-05-07T20:35:00Z"
     }
   ]
@@ -289,6 +302,359 @@ O backend registra logs estruturados para:
 - `document_upload_validation_failed`
 - `document_upload_forbidden_profile`
 - `document_upload_missing_prestador`
+
+Observacoes:
+
+- Cada documento enviado fica vinculado ao `ProcessoHomologacao` vigente do prestador.
+- Cada documento salvo gera um evento `Documento enviado` no historico do processo.
+- Quando um novo arquivo e enviado para um `TipoDocumento` que ja possui documento ativo no mesmo processo:
+  - o documento anterior recebe status `SUBSTITUIDO`;
+  - o novo documento recebe `versao = versao_anterior + 1`;
+  - o novo documento referencia o anterior em `documento_anterior`;
+  - o historico recebe o evento `Documento substituido`.
+- Apos o upload, o backend recalcula o status do processo:
+  - `DOCUMENTACAO_PENDENTE` quando ainda existem documentos obrigatorios pendentes.
+  - `EM_VALIDACAO` quando todos os documentos obrigatorios ativos foram enviados.
+
+## GET /api/prestador/processo/
+
+Retorna o resumo completo da jornada do prestador autenticado: status atual, pendencias, documentos enviados e historico de eventos.
+
+Requer autenticacao JWT de usuario com perfil `PRESTADOR`.
+
+### Headers
+
+```http
+Authorization: Bearer <access_token>
+```
+
+### Response 200
+
+```json
+{
+  "id": 1,
+  "prestador": {
+    "id": 1,
+    "razao_social": "Clinica Exemplo LTDA",
+    "nome_fantasia": "Clinica Exemplo",
+    "cnpj": "12345678000190",
+    "endereco": "Rua Central, 100",
+    "nome_responsavel": "Maria Silva",
+    "email": "prestador@example.com",
+    "telefone": "(11) 99999-9999",
+    "criado_em": "2026-05-10T10:00:00Z",
+    "atualizado_em": "2026-05-10T10:00:00Z"
+  },
+  "status_atual": "DOCUMENTACAO_PENDENTE",
+  "criado_em": "2026-05-10T10:00:00Z",
+  "atualizado_em": "2026-05-10T10:20:00Z",
+  "concluido_em": null,
+  "pendencias": [
+    {
+      "id": 2,
+      "nome": "Comprovante de Endereco",
+      "descricao": "Comprovante atualizado do endereco informado.",
+      "obrigatorio": true,
+      "ativo": true,
+      "criado_em": "2026-05-10T10:00:00Z",
+      "atualizado_em": "2026-05-10T10:00:00Z"
+    }
+  ],
+  "documentos_enviados": [
+    {
+      "id": 10,
+      "tipo_documento": {
+        "id": 1,
+        "nome": "Contrato Social",
+        "descricao": "Documento de constituicao da empresa.",
+        "obrigatorio": true,
+        "ativo": true,
+        "criado_em": "2026-05-10T10:00:00Z",
+        "atualizado_em": "2026-05-10T10:00:00Z"
+      },
+      "arquivo": "/media/documentos/contrato.pdf",
+      "content_type": "application/pdf",
+      "tamanho_bytes": 123456,
+      "status": "ENVIADO",
+      "versao": 1,
+      "documento_anterior": null,
+      "validado_por_email": null,
+      "validado_em": null,
+      "motivo_reprovacao": null,
+      "observacoes": null,
+      "enviado_em": "2026-05-10T10:20:00Z"
+    }
+  ],
+  "historico": [
+    {
+      "id": 5,
+      "acao": "Documento enviado",
+      "descricao": "Documento Contrato Social enviado pelo prestador.",
+      "usuario_email": "prestador@example.com",
+      "metadados": {
+        "documento_id": 10,
+        "tipo_documento_id": 1,
+        "arquivo_nome": "contrato.pdf",
+        "tamanho_bytes": 123456
+      },
+      "criado_em": "2026-05-10T10:20:00Z"
+    }
+  ]
+}
+```
+
+### Response 401
+
+Retornado quando o token JWT esta ausente, invalido ou expirado.
+
+## GET /api/processos/<id_processo>/documentos/
+
+Lista os documentos de um processo agrupados por tipo de documento, incluindo o documento atual e o historico de versoes.
+
+Perfis administrativos podem consultar qualquer processo. Prestadores podem consultar apenas o proprio processo.
+
+### Headers
+
+```http
+Authorization: Bearer <access_token>
+```
+
+### Response 200
+
+```json
+{
+  "processo": 1,
+  "documentos": [
+    {
+      "tipo_documento": {
+        "id": 1,
+        "nome": "Contrato Social",
+        "descricao": "Documento de constituicao da empresa.",
+        "obrigatorio": true,
+        "ativo": true,
+        "criado_em": "2026-05-11T10:00:00Z",
+        "atualizado_em": "2026-05-11T10:00:00Z"
+      },
+      "documento_atual": {
+        "id": 12,
+        "tipo_documento": {
+          "id": 1,
+          "nome": "Contrato Social",
+          "descricao": "Documento de constituicao da empresa.",
+          "obrigatorio": true,
+          "ativo": true,
+          "criado_em": "2026-05-11T10:00:00Z",
+          "atualizado_em": "2026-05-11T10:00:00Z"
+        },
+        "arquivo": "/media/documentos/contrato-v2.pdf",
+        "content_type": "application/pdf",
+        "tamanho_bytes": 124000,
+        "status": "ENVIADO",
+        "versao": 2,
+        "documento_anterior": 10,
+        "validado_por_email": null,
+        "validado_em": null,
+        "motivo_reprovacao": null,
+        "observacoes": null,
+        "enviado_em": "2026-05-11T11:00:00Z"
+      },
+      "versoes": [
+        {
+          "id": 12,
+          "status": "ENVIADO",
+          "versao": 2,
+          "documento_anterior": 10,
+          "validado_por_email": null,
+          "validado_em": null,
+          "motivo_reprovacao": null,
+          "observacoes": null,
+          "enviado_em": "2026-05-11T11:00:00Z"
+        },
+        {
+          "id": 10,
+          "status": "SUBSTITUIDO",
+          "versao": 1,
+          "documento_anterior": null,
+          "validado_por_email": "analista@example.com",
+          "validado_em": "2026-05-11T10:30:00Z",
+          "motivo_reprovacao": "Documento ilegivel.",
+          "observacoes": "Enviar novamente com melhor qualidade.",
+          "enviado_em": "2026-05-11T10:00:00Z"
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Response 401
+
+Retornado quando o token JWT esta ausente, invalido ou expirado.
+
+### Response 403
+
+Retornado quando o usuario nao possui acesso ao processo informado.
+
+## GET /api/admin/processos/
+
+Lista todos os processos de homologacao para uso administrativo.
+
+Apenas usuarios com perfil `EQUIPE_ADMINISTRATIVA` ou `ADMINISTRADOR` podem acessar.
+
+### Headers
+
+```http
+Authorization: Bearer <access_token>
+```
+
+### Response 200
+
+```json
+{
+  "processos": [
+    {
+      "id": 1,
+      "prestador": {
+        "id": 1,
+        "razao_social": "Clinica Exemplo LTDA",
+        "nome_fantasia": "Clinica Exemplo",
+        "cnpj": "12345678000190",
+        "endereco": "Rua Central, 100",
+        "nome_responsavel": "Maria Silva",
+        "email": "prestador@example.com",
+        "telefone": "(11) 99999-9999",
+        "criado_em": "2026-05-13T10:00:00Z",
+        "atualizado_em": "2026-05-13T10:00:00Z"
+      },
+      "status_atual": "DOCUMENTACAO_PENDENTE",
+      "total_documentos": 2,
+      "total_pendencias": 1,
+      "ultimo_evento": {
+        "id": 7,
+        "acao": "Documento enviado",
+        "descricao": "Documento Contrato Social enviado pelo prestador.",
+        "usuario_email": "prestador@example.com",
+        "metadados": {
+          "documento_id": 10,
+          "tipo_documento_id": 1,
+          "arquivo_nome": "contrato.pdf",
+          "tamanho_bytes": 123456,
+          "versao": 1,
+          "documento_anterior_id": null
+        },
+        "criado_em": "2026-05-13T10:30:00Z"
+      },
+      "criado_em": "2026-05-13T10:00:00Z",
+      "atualizado_em": "2026-05-13T10:30:00Z",
+      "concluido_em": null
+    }
+  ]
+}
+```
+
+### Response 401
+
+Retornado quando o token JWT esta ausente, invalido ou expirado.
+
+### Response 403
+
+Retornado quando o usuario autenticado nao possui perfil administrativo.
+
+## POST /api/admin/documentos/<id_documento>/validar/
+
+Valida individualmente um documento enviado. Apenas usuarios com perfil `EQUIPE_ADMINISTRATIVA` ou `ADMINISTRADOR` podem acessar.
+
+### Headers
+
+```http
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+### Request
+
+```json
+{
+  "status": "REPROVADO",
+  "motivo_reprovacao": "Documento ilegivel.",
+  "observacoes": "Enviar novamente com melhor qualidade."
+}
+```
+
+### Campos
+
+| Campo | Tipo | Obrigatorio | Regra |
+| --- | --- | --- | --- |
+| `status` | string | Sim | Aceita apenas `APROVADO` ou `REPROVADO` |
+| `motivo_reprovacao` | string | Condicional | Obrigatorio quando `status` for `REPROVADO` |
+| `observacoes` | string | Nao | Observacoes internas da validacao |
+
+### Response 200
+
+```json
+{
+  "id": 10,
+  "tipo_documento": {
+    "id": 1,
+    "nome": "Contrato Social",
+    "descricao": "Documento de constituicao da empresa.",
+    "obrigatorio": true,
+    "ativo": true,
+    "criado_em": "2026-05-11T10:00:00Z",
+    "atualizado_em": "2026-05-11T10:00:00Z"
+  },
+  "arquivo": "/media/documentos/contrato.pdf",
+  "content_type": "application/pdf",
+  "tamanho_bytes": 123456,
+  "status": "REPROVADO",
+  "versao": 1,
+  "documento_anterior": null,
+  "validado_por_email": "analista@example.com",
+  "validado_em": "2026-05-11T10:30:00Z",
+  "motivo_reprovacao": "Documento ilegivel.",
+  "observacoes": "Enviar novamente com melhor qualidade.",
+  "enviado_em": "2026-05-11T10:00:00Z"
+}
+```
+
+Observacoes:
+
+- A validacao registra `validado_por` e `validado_em`.
+- A validacao gera evento `Documento validado` no historico do processo.
+- Quando o documento e reprovado, o processo passa para `CORRECAO_SOLICITADA`.
+- Quando todos os documentos obrigatorios ativos estao aprovados, o processo passa para `EM_APROVACAO_INTERNA`.
+
+### Response 400
+
+Exemplo de reprovacao sem motivo:
+
+```json
+{
+  "motivo_reprovacao": [
+    "Informe o motivo da reprovacao."
+  ]
+}
+```
+
+### Response 401
+
+Retornado quando o token JWT esta ausente, invalido ou expirado.
+
+### Response 403
+
+Retornado quando o usuario autenticado nao possui perfil administrativo.
+
+### Response 403
+
+Retornado quando o usuario autenticado nao possui perfil `PRESTADOR` ou nao possui cadastro de prestador vinculado.
+
+Exemplo:
+
+```json
+{
+  "detail": "Apenas prestadores podem consultar este processo."
+}
+```
 
 ## GET /api/documentos/tipos/
 
@@ -367,6 +733,39 @@ Retornado quando o token JWT esta ausente, invalido ou expirado.
 | `criado_em` | Data de criacao |
 | `atualizado_em` | Data da ultima atualizacao |
 
+### ProcessoHomologacao
+
+| Campo | Descricao |
+| --- | --- |
+| `prestador` | Relacao 1:1 com o prestador |
+| `status` | Status formal da jornada de homologacao |
+| `criado_em` | Data de criacao do processo |
+| `atualizado_em` | Data da ultima atualizacao |
+| `concluido_em` | Data de conclusao, quando aplicavel |
+
+Status permitidos:
+
+- `CADASTRO_INICIADO`
+- `DOCUMENTACAO_PENDENTE`
+- `EM_VALIDACAO`
+- `CORRECAO_SOLICITADA`
+- `EM_APROVACAO_INTERNA`
+- `REPROVADO`
+- `APROVADO`
+- `MINUTA_GERADA`
+- `PROCESSO_CONCLUIDO`
+
+### HistoricoProcesso
+
+| Campo | Descricao |
+| --- | --- |
+| `processo` | Processo vinculado ao evento |
+| `acao` | Nome curto do evento, como `Cadastro criado` ou `Documento enviado` |
+| `descricao` | Detalhe textual opcional |
+| `usuario` | Usuario responsavel pelo evento, quando houver |
+| `metadados` | Dados estruturados do evento |
+| `criado_em` | Data e hora do evento |
+
 ### TipoDocumento
 
 | Campo | Descricao |
@@ -383,8 +782,16 @@ Retornado quando o token JWT esta ausente, invalido ou expirado.
 | Campo | Descricao |
 | --- | --- |
 | `prestador` | Prestador vinculado ao documento |
+| `processo` | Processo de homologacao vinculado ao documento |
 | `tipo_documento` | Tipo de documento enviado |
 | `arquivo` | Arquivo salvo em `media/documentos/` |
 | `content_type` | Tipo MIME informado no upload |
 | `tamanho_bytes` | Tamanho do arquivo em bytes |
+| `status` | `ENVIADO`, `EM_VALIDACAO`, `APROVADO`, `REPROVADO` ou `SUBSTITUIDO` |
+| `versao` | Numero sequencial da versao do documento dentro do processo e tipo |
+| `documento_anterior` | Documento substituido pela versao atual, quando houver |
+| `validado_por` | Usuario administrativo que validou o documento |
+| `validado_em` | Data e hora da validacao |
+| `motivo_reprovacao` | Motivo informado quando o documento e reprovado |
+| `observacoes` | Observacoes administrativas da validacao |
 | `enviado_em` | Data e hora exata do envio |

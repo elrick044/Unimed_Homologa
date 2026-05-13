@@ -16,6 +16,8 @@ const DEFAULT_DOCUMENT_TYPES = [
   { id: "4", nome: "Certidao Negativa" },
 ];
 
+const EMPTY_TYPE_IDS = [];
+
 function formatFileSize(bytes) {
   if (!bytes) return "0 KB";
 
@@ -40,9 +42,14 @@ function getApiMessage(data) {
   return "Nao foi possivel enviar os documentos. Tente novamente.";
 }
 
-export default function DocumentoUpload({ disabled = false }) {
+export default function DocumentoUpload({
+  disabled = false,
+  documentTypes: providedDocumentTypes,
+  hiddenTypeIds = EMPTY_TYPE_IDS,
+  onUploadSuccess,
+}) {
   const inputRef = useRef(null);
-  const [documentTypes, setDocumentTypes] = useState(DEFAULT_DOCUMENT_TYPES);
+  const [apiDocumentTypes, setApiDocumentTypes] = useState(DEFAULT_DOCUMENT_TYPES);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -50,13 +57,26 @@ export default function DocumentoUpload({ disabled = false }) {
   const [feedback, setFeedback] = useState(null);
   const [uploadedDocuments, setUploadedDocuments] = useState([]);
 
+  const hiddenTypeSet = useMemo(() => new Set(hiddenTypeIds.map(String)), [hiddenTypeIds]);
+
+  const documentTypes = useMemo(() => {
+    const sourceTypes = providedDocumentTypes?.length ? providedDocumentTypes : apiDocumentTypes;
+    return sourceTypes
+      .map((type) => ({ ...type, id: String(type.id) }))
+      .filter((type) => !hiddenTypeSet.has(String(type.id)));
+  }, [apiDocumentTypes, hiddenTypeSet, providedDocumentTypes]);
+
   const canSubmit = useMemo(
-    () => !disabled && selectedFiles.length > 0 && selectedFiles.every((item) => item.tipoDocumentoId),
-    [disabled, selectedFiles],
+    () =>
+      !disabled &&
+      documentTypes.length > 0 &&
+      selectedFiles.length > 0 &&
+      selectedFiles.every((item) => item.tipoDocumentoId),
+    [disabled, documentTypes.length, selectedFiles],
   );
 
   useEffect(() => {
-    if (disabled) return;
+    if (disabled || providedDocumentTypes?.length) return;
 
     let isMounted = true;
 
@@ -66,22 +86,33 @@ export default function DocumentoUpload({ disabled = false }) {
         const apiTypes = data.tipos_documento || [];
 
         if (isMounted && apiTypes.length) {
-          setDocumentTypes(apiTypes.map((type) => ({ id: String(type.id), nome: type.nome })));
+          setApiDocumentTypes(apiTypes);
         }
       })
       .catch(() => {
         if (isMounted) {
-          setDocumentTypes(DEFAULT_DOCUMENT_TYPES);
+          setApiDocumentTypes(DEFAULT_DOCUMENT_TYPES);
         }
       });
 
     return () => {
       isMounted = false;
     };
-  }, [disabled]);
+  }, [disabled, providedDocumentTypes]);
+
+  useEffect(() => {
+    setSelectedFiles((currentFiles) =>
+      currentFiles
+        .filter((item) => documentTypes.some((type) => String(type.id) === String(item.tipoDocumentoId)))
+        .map((item) => ({
+          ...item,
+          tipoDocumentoId: item.tipoDocumentoId || documentTypes[0]?.id || "",
+        })),
+    );
+  }, [documentTypes]);
 
   const addFiles = (fileList) => {
-    if (disabled || isUploading) return;
+    if (disabled || isUploading || documentTypes.length === 0) return;
 
     const incomingFiles = Array.from(fileList || []);
     const pdfFiles = incomingFiles.filter(isPdf);
@@ -148,6 +179,7 @@ export default function DocumentoUpload({ disabled = false }) {
         type: "success",
         message: "Documentos recebidos com sucesso.",
       });
+      onUploadSuccess?.(data.documentos || []);
 
       if (inputRef.current) {
         inputRef.current.value = "";
@@ -174,7 +206,9 @@ export default function DocumentoUpload({ disabled = false }) {
         <div>
           <h2 className="text-xl font-semibold text-gray-950">Envio de documentos</h2>
           <p className="mt-1 text-sm text-gray-600">
-            Selecione os PDFs exigidos para a homologacao e confirme o envio.
+            {documentTypes.length
+              ? "Selecione os PDFs exigidos para a homologacao e confirme o envio."
+              : "Nao ha novos tipos de documento pendentes para envio."}
           </p>
         </div>
       </div>
@@ -208,12 +242,12 @@ export default function DocumentoUpload({ disabled = false }) {
             multiple
             className="sr-only"
             onChange={(event) => addFiles(event.target.files)}
-            disabled={isUploading || disabled}
+            disabled={isUploading || disabled || documentTypes.length === 0}
           />
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
-            disabled={isUploading || disabled}
+            disabled={isUploading || disabled || documentTypes.length === 0}
             className="mt-5 inline-flex min-h-11 items-center justify-center rounded-lg bg-[#006F46] px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#00583C] focus:outline-none focus:ring-2 focus:ring-[#009966] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
           >
             Selecionar PDFs
