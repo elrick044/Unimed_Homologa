@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: . # O contexto é a raiz para poder acessar a pasta api_django
+      dockerfile: ./docker/django/Dockerfile
+    container_name: django_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./api_django:/app
+    environment:
+      - DEBUG=1
+      # Adicione aqui suas variáveis de ambiente de banco de dados, chaves, etc.
+
+  frontend:
+    build:
+      context: . # O contexto é a raiz para poder acessar a pasta cadastro_Unimed
+      dockerfile: ./docker/react/Dockerfile
+    container_name: react_nginx_frontend
+    ports:
+      - "8081:80"
+    depends_on:
+      - backend
+    # Não usamos volumes aqui pois o Nginx servirá a build final (pasta dist do Vite)
