@@ -1,7 +1,17 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import DocumentoPrestador, HistoricoProcesso, PrestadorEmpresa, ProcessoHomologacao, TipoDocumento, User
+from .models import (
+    DocumentoPrestador,
+    EtapaAprovacao,
+    FluxoAprovacao,
+    HistoricoProcesso,
+    ParecerProcesso,
+    PrestadorEmpresa,
+    ProcessoHomologacao,
+    TipoDocumento,
+    User,
+)
 
 
 @admin.register(User)
@@ -64,3 +74,29 @@ class HistoricoProcessoAdmin(admin.ModelAdmin):
     list_display = ('processo', 'acao', 'usuario', 'criado_em')
     list_filter = ('acao', 'criado_em')
     search_fields = ('processo__prestador__razao_social', 'acao', 'descricao')
+
+
+class EtapaAprovacaoInline(admin.TabularInline):
+    model = EtapaAprovacao
+    extra = 0
+
+
+@admin.register(FluxoAprovacao)
+class FluxoAprovacaoAdmin(admin.ModelAdmin):
+    list_display = ('processo', 'iniciado_em', 'atualizado_em')
+    search_fields = ('processo__prestador__razao_social', 'processo__prestador__cnpj')
+    inlines = (EtapaAprovacaoInline,)
+
+
+@admin.register(EtapaAprovacao)
+class EtapaAprovacaoAdmin(admin.ModelAdmin):
+    list_display = ('fluxo', 'aprovador', 'ordem', 'status', 'data_liberacao', 'data_conclusao')
+    list_filter = ('status', 'data_liberacao', 'data_conclusao')
+    search_fields = ('fluxo__processo__prestador__razao_social', 'aprovador__email')
+
+
+@admin.register(ParecerProcesso)
+class ParecerProcessoAdmin(admin.ModelAdmin):
+    list_display = ('processo', 'aprovador', 'decisao', 'data_hora')
+    list_filter = ('decisao', 'data_hora')
+    search_fields = ('processo__prestador__razao_social', 'aprovador__email', 'observacoes')

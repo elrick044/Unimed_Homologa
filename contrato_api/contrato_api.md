@@ -28,6 +28,7 @@ Endpoints autenticados atuais:
 - `POST /api/documentos/upload/`
 - `GET /api/admin/processos/`
 - `GET /api/processos/<id_processo>/documentos/`
+- `POST /api/admin/processos/<id_processo>/parecer/`
 - `POST /api/admin/documentos/<id_documento>/validar/`
 
 ## POST /api/auth/register/prestador/
@@ -315,6 +316,7 @@ Observacoes:
 - Apos o upload, o backend recalcula o status do processo:
   - `DOCUMENTACAO_PENDENTE` quando ainda existem documentos obrigatorios pendentes.
   - `EM_VALIDACAO` quando todos os documentos obrigatorios ativos foram enviados.
+- Quando o processo entra em `EM_APROVACAO_INTERNA`, o backend cria automaticamente o fluxo sequencial de aprovacao interna.
 
 ## GET /api/prestador/processo/
 
@@ -399,7 +401,41 @@ Authorization: Bearer <access_token>
       },
       "criado_em": "2026-05-10T10:20:00Z"
     }
-  ]
+  ],
+  "fluxo_aprovacao": {
+    "id": 1,
+    "status": "EM_ANDAMENTO",
+    "iniciado_em": "2026-05-10T10:40:00Z",
+    "encerrado_em": null,
+    "atualizado_em": "2026-05-10T10:40:00Z",
+    "etapas": [
+      {
+        "id": 1,
+        "aprovador": 20,
+        "aprovador_email": "aprovador1@example.com",
+        "aprovador_nome": "aprovador1@example.com",
+        "ordem": 1,
+        "status": "LIBERADO",
+        "data_liberacao": "2026-05-10T10:40:00Z",
+        "data_conclusao": null,
+        "criado_em": "2026-05-10T10:40:00Z",
+        "atualizado_em": "2026-05-10T10:40:00Z"
+      },
+      {
+        "id": 2,
+        "aprovador": 21,
+        "aprovador_email": "aprovador2@example.com",
+        "aprovador_nome": "aprovador2@example.com",
+        "ordem": 2,
+        "status": "AGUARDANDO",
+        "data_liberacao": null,
+        "data_conclusao": null,
+        "criado_em": "2026-05-10T10:40:00Z",
+        "atualizado_em": "2026-05-10T10:40:00Z"
+      }
+    ]
+  },
+  "pareceres": []
 }
 ```
 
@@ -560,6 +596,117 @@ Retornado quando o token JWT esta ausente, invalido ou expirado.
 
 Retornado quando o usuario autenticado nao possui perfil administrativo.
 
+## POST /api/admin/processos/<id_processo>/parecer/
+
+Emite um parecer na cadeia sequencial de aprovacao interna.
+
+Apenas usuarios com perfil `EQUIPE_ADMINISTRATIVA` ou `ADMINISTRADOR` podem acessar. Alem disso, o usuario logado deve ser o aprovador da etapa atualmente `LIBERADO`.
+
+### Headers
+
+```http
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+### Request
+
+```json
+{
+  "decisao": "APROVADO",
+  "observacoes": "Parecer favoravel para continuidade."
+}
+```
+
+### Campos
+
+| Campo | Tipo | Obrigatorio | Regra |
+| --- | --- | --- | --- |
+| `decisao` | string | Sim | Aceita `APROVADO` ou `REPROVADO` |
+| `observacoes` | string | Nao | Texto livre usado tambem como motivo em caso de reprovacao |
+
+### Response 201
+
+```json
+{
+  "parecer": {
+    "id": 1,
+    "aprovador": 20,
+    "aprovador_email": "aprovador1@example.com",
+    "etapa": 1,
+    "decisao": "APROVADO",
+    "observacoes": "Parecer favoravel para continuidade.",
+    "data_hora": "2026-05-26T10:00:00Z",
+    "docusign_envelope_id": null,
+    "docusign_recipient_id": null,
+    "docusign_status": null,
+    "docusign_assinado_em": null
+  },
+  "processo_status": "EM_APROVACAO_INTERNA",
+  "fluxo_status": "EM_ANDAMENTO",
+  "etapa_status": "CONCLUIDO",
+  "proxima_etapa": 2
+}
+```
+
+### Regras de Transicao
+
+Quando `decisao = APROVADO`:
+
+- A etapa atual passa para `CONCLUIDO`.
+- `data_conclusao` da etapa atual e preenchida.
+- A proxima etapa por ordem passa para `LIBERADO`.
+- Se nao houver proxima etapa, o fluxo passa para `CONCLUIDO`, `encerrado_em` e preenchido e o processo passa para `APROVADO`.
+- O historico recebe `Etapa de aprovacao liberada` ou `Processo aprovado`, conforme o caso.
+
+Quando `decisao = REPROVADO`:
+
+- A etapa atual passa para `CONCLUIDO`.
+- O fluxo passa para `ENCERRADO` e `encerrado_em` e preenchido.
+- O processo passa imediatamente para `REPROVADO`.
+- O historico recebe `Processo reprovado` com o motivo em `metadados.motivo`.
+- Todas as alteracoes ocorrem na mesma transacao de banco.
+
+### Observabilidade
+
+O backend registra logs estruturados para:
+
+- `parecer_attempt`
+- `parecer_blocked_order_or_user`
+- `parecer_blocked_state`
+- `parecer_success`
+- `parecer_final_state_transition`
+
+### Response 400
+
+Retornado quando o processo ou fluxo nao esta em estado valido para receber parecer.
+
+Exemplo:
+
+```json
+{
+  "processo": [
+    "Processo nao esta em aprovacao interna."
+  ]
+}
+```
+
+### Response 401
+
+Retornado quando o token JWT esta ausente, invalido ou expirado.
+
+### Response 403
+
+Retornado quando o usuario nao e o aprovador da etapa liberada ou nao possui perfil administrativo.
+
+Exemplo:
+
+```json
+{
+  "detail": "Usuario nao possui etapa liberada para este processo."
+}
+```
+
 ## POST /api/admin/documentos/<id_documento>/validar/
 
 Valida individualmente um documento enviado. Apenas usuarios com perfil `EQUIPE_ADMINISTRATIVA` ou `ADMINISTRADOR` podem acessar.
@@ -623,6 +770,8 @@ Observacoes:
 - A validacao gera evento `Documento validado` no historico do processo.
 - Quando o documento e reprovado, o processo passa para `CORRECAO_SOLICITADA`.
 - Quando todos os documentos obrigatorios ativos estao aprovados, o processo passa para `EM_APROVACAO_INTERNA`.
+- Ao entrar em `EM_APROVACAO_INTERNA`, a cadeia padrao de aprovacao e criada automaticamente com os usuarios ativos de perfil `EQUIPE_ADMINISTRATIVA`, ordenados por `id`.
+- A primeira etapa e criada com status `LIBERADO`; as demais com status `AGUARDANDO`.
 
 ### Response 400
 
@@ -765,6 +914,64 @@ Status permitidos:
 | `usuario` | Usuario responsavel pelo evento, quando houver |
 | `metadados` | Dados estruturados do evento |
 | `criado_em` | Data e hora do evento |
+
+### FluxoAprovacao
+
+| Campo | Descricao |
+| --- | --- |
+| `processo` | Processo de homologacao vinculado ao fluxo |
+| `status` | `EM_ANDAMENTO`, `CONCLUIDO` ou `ENCERRADO` |
+| `iniciado_em` | Data de inicio do fluxo |
+| `encerrado_em` | Data em que o fluxo foi concluido ou encerrado por reprovacao |
+| `atualizado_em` | Data da ultima atualizacao |
+
+Observacoes:
+
+- Existe no maximo um fluxo por processo.
+- O fluxo e criado automaticamente quando o processo entra em `EM_APROVACAO_INTERNA`.
+- A configuracao padrao usa usuarios ativos com perfil `EQUIPE_ADMINISTRATIVA`, em ordem crescente de `id`.
+
+### EtapaAprovacao
+
+| Campo | Descricao |
+| --- | --- |
+| `fluxo` | Fluxo de aprovacao vinculado |
+| `aprovador` | Usuario responsavel pela etapa |
+| `ordem` | Posicao sequencial do aprovador |
+| `status` | `AGUARDANDO`, `LIBERADO` ou `CONCLUIDO` |
+| `data_liberacao` | Data em que a etapa foi liberada para parecer |
+| `data_conclusao` | Data em que a etapa foi concluida |
+| `criado_em` | Data de criacao |
+| `atualizado_em` | Data da ultima atualizacao |
+
+Regras:
+
+- A ordem e unica dentro de cada fluxo.
+- Um aprovador nao se repete dentro do mesmo fluxo.
+- A primeira etapa da cadeia padrao inicia como `LIBERADO`.
+
+### ParecerProcesso
+
+| Campo | Descricao |
+| --- | --- |
+| `processo` | Processo avaliado |
+| `aprovador` | Usuario que emitiu o parecer |
+| `etapa` | Etapa de aprovacao relacionada, quando houver |
+| `decisao` | `APROVADO` ou `REPROVADO` |
+| `observacoes` | Texto livre do parecer |
+| `data_hora` | Data e hora do parecer |
+| `docusign_envelope_id` | Campo previsto para integracao futura com DocuSign |
+| `docusign_recipient_id` | Campo previsto para integracao futura com DocuSign |
+| `docusign_status` | Campo previsto para integracao futura com DocuSign |
+| `docusign_assinado_em` | Campo previsto para integracao futura com DocuSign |
+
+## Permissoes
+
+As permissoes DRF customizadas seguem estas regras:
+
+- Prestador acessa apenas processos cujo `prestador_empresa` pertence ao proprio usuario.
+- Equipe Administrativa acessa processos para analise.
+- Administrador acessa todos os processos e configuracoes administrativas.
 
 ### TipoDocumento
 

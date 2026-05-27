@@ -12,12 +12,15 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import DocumentoPrestador, ProcessoHomologacao, TipoDocumento, User
+from .models import DocumentoPrestador, ParecerProcesso, ProcessoHomologacao, TipoDocumento, User
+from .permissions import CanAccessProcess, IsAdministrativeTeam
 from .serializers import (
     DocumentoPrestadorHistoricoSerializer,
     DocumentoPrestadorSerializer,
     DocumentoValidacaoSerializer,
     LoginSerializer,
+    ParecerProcessoCreateSerializer,
+    ParecerProcessoSerializer,
     PrestadorEmpresaSerializer,
     PrestadorRegisterSerializer,
     ProcessoHomologacaoListSerializer,
@@ -25,6 +28,7 @@ from .serializers import (
     TipoDocumentoSerializer,
     UserSessionSerializer,
 )
+from .services import emitir_parecer_processo
 
 
 logger = logging.getLogger(__name__)
@@ -32,6 +36,10 @@ MAX_EXPECTED_UPLOAD_SIZE = 10 * 1024 * 1024
 
 
 def log_upload_event(event, **payload):
+    logger.info(json.dumps({'event': event, **payload}, ensure_ascii=False))
+
+
+def log_parecer_event(event, **payload):
     logger.info(json.dumps({'event': event, **payload}, ensure_ascii=False))
 
 
@@ -59,10 +67,6 @@ def get_or_create_processo(prestador, usuario=None):
         )
 
     return processo
-
-
-def is_admin_profile(user):
-    return user.perfil in (User.Perfil.EQUIPE_ADMINISTRATIVA, User.Perfil.ADMINISTRADOR)
 
 
 class PrestadorRegisterView(APIView):
@@ -284,15 +288,11 @@ class PrestadorProcessoView(APIView):
 
 
 class ProcessoDocumentoListView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, CanAccessProcess)
 
     def get(self, request, id_processo):
         processo = get_object_or_404(ProcessoHomologacao, id=id_processo)
-
-        if not is_admin_profile(request.user):
-            prestador = getattr(request.user, 'prestador_empresa', None)
-            if not prestador or processo.prestador_id != prestador.id:
-                raise PermissionDenied('Usuario nao possui acesso a este processo.')
+        self.check_object_permissions(request, processo)
 
         grupos = []
         tipos_documento = TipoDocumento.objects.filter(
@@ -317,12 +317,9 @@ class ProcessoDocumentoListView(APIView):
 
 
 class AdminProcessoListView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, IsAdministrativeTeam)
 
     def get(self, request):
-        if not is_admin_profile(request.user):
-            raise PermissionDenied('Apenas perfis administrativos podem listar processos.')
-
         processos = ProcessoHomologacao.objects.select_related(
             'prestador',
             'prestador__user',
@@ -337,13 +334,30 @@ class AdminProcessoListView(APIView):
         )
 
 
+class AdminProcessoDetailView(APIView):
+    permission_classes = (IsAuthenticated, IsAdministrativeTeam)
+
+    def get(self, request, id_processo):
+        processo = get_object_or_404(
+            ProcessoHomologacao.objects.select_related('prestador', 'prestador__user').prefetch_related(
+                'documentos',
+                'historico',
+                'pareceres',
+                'fluxo_aprovacao__etapas',
+            ),
+            id=id_processo,
+        )
+
+        return Response(
+            ProcessoHomologacaoResumoSerializer(processo).data,
+            status=status.HTTP_200_OK,
+        )
+
+
 class AdminDocumentoValidacaoView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, IsAdministrativeTeam)
 
     def post(self, request, id_documento):
-        if not is_admin_profile(request.user):
-            raise PermissionDenied('Apenas perfis administrativos podem validar documentos.')
-
         documento = get_object_or_404(DocumentoPrestador, id=id_documento)
         serializer = DocumentoValidacaoSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -409,4 +423,86 @@ class AdminDocumentoValidacaoView(APIView):
         return Response(
             DocumentoPrestadorSerializer(documento).data,
             status=status.HTTP_200_OK,
+        )
+
+
+class AdminProcessoParecerView(APIView):
+    permission_classes = (IsAuthenticated, IsAdministrativeTeam)
+
+    def post(self, request, id_processo):
+        processo = get_object_or_404(ProcessoHomologacao, id=id_processo)
+        serializer = ParecerProcessoCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        decisao = serializer.validated_data['decisao']
+        observacoes = serializer.validated_data.get('observacoes', '')
+
+        log_parecer_event(
+            'parecer_attempt',
+            processo_id=processo.id,
+            user_id=request.user.id,
+            decisao=decisao,
+        )
+
+        try:
+            context = emitir_parecer_processo(
+                processo=processo,
+                usuario=request.user,
+                decisao=decisao,
+                observacoes=observacoes,
+                logger=logger,
+            )
+        except PermissionDenied as exc:
+            log_parecer_event(
+                'parecer_blocked_order_or_user',
+                processo_id=processo.id,
+                user_id=request.user.id,
+                decisao=decisao,
+                detail=str(exc.detail),
+            )
+            raise
+        except ValidationError as exc:
+            log_parecer_event(
+                'parecer_blocked_state',
+                processo_id=processo.id,
+                user_id=request.user.id,
+                decisao=decisao,
+                detail=exc.detail,
+            )
+            raise
+
+        final_state = context.processo.status in (
+            ProcessoHomologacao.Status.APROVADO,
+            ProcessoHomologacao.Status.REPROVADO,
+        )
+        log_parecer_event(
+            'parecer_success',
+            processo_id=context.processo.id,
+            user_id=request.user.id,
+            parecer_id=context.parecer.id,
+            etapa_id=context.etapa_atual.id,
+            decisao=context.decisao,
+            processo_status=context.processo.status,
+            fluxo_status=context.fluxo.status,
+            final_state=final_state,
+        )
+
+        if final_state:
+            log_parecer_event(
+                'parecer_final_state_transition',
+                processo_id=context.processo.id,
+                parecer_id=context.parecer.id,
+                processo_status=context.processo.status,
+                fluxo_status=context.fluxo.status,
+            )
+
+        return Response(
+            {
+                'parecer': ParecerProcessoSerializer(context.parecer).data,
+                'processo_status': context.processo.status,
+                'fluxo_status': context.fluxo.status,
+                'etapa_status': context.etapa_atual.status,
+                'proxima_etapa': context.proxima_etapa.id if context.proxima_etapa else None,
+            },
+            status=status.HTTP_201_CREATED,
         )

@@ -5,7 +5,17 @@ from django.contrib.auth.password_validation import validate_password
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import DocumentoPrestador, HistoricoProcesso, PrestadorEmpresa, ProcessoHomologacao, TipoDocumento, User
+from .models import (
+    DocumentoPrestador,
+    EtapaAprovacao,
+    FluxoAprovacao,
+    HistoricoProcesso,
+    ParecerProcesso,
+    PrestadorEmpresa,
+    ProcessoHomologacao,
+    TipoDocumento,
+    User,
+)
 
 
 CNPJ_FORMAT_RE = re.compile(r'^\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}$')
@@ -201,12 +211,73 @@ class HistoricoProcessoSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class EtapaAprovacaoSerializer(serializers.ModelSerializer):
+    aprovador_email = serializers.EmailField(source='aprovador.email', read_only=True)
+    aprovador_nome = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EtapaAprovacao
+        fields = (
+            'id',
+            'aprovador',
+            'aprovador_email',
+            'aprovador_nome',
+            'ordem',
+            'status',
+            'data_liberacao',
+            'data_conclusao',
+            'criado_em',
+            'atualizado_em',
+        )
+        read_only_fields = fields
+
+    def get_aprovador_nome(self, obj):
+        return obj.aprovador.get_full_name() or obj.aprovador.email
+
+
+class FluxoAprovacaoSerializer(serializers.ModelSerializer):
+    etapas = EtapaAprovacaoSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = FluxoAprovacao
+        fields = ('id', 'status', 'iniciado_em', 'encerrado_em', 'atualizado_em', 'etapas')
+        read_only_fields = fields
+
+
+class ParecerProcessoSerializer(serializers.ModelSerializer):
+    aprovador_email = serializers.EmailField(source='aprovador.email', read_only=True)
+
+    class Meta:
+        model = ParecerProcesso
+        fields = (
+            'id',
+            'aprovador',
+            'aprovador_email',
+            'etapa',
+            'decisao',
+            'observacoes',
+            'data_hora',
+            'docusign_envelope_id',
+            'docusign_recipient_id',
+            'docusign_status',
+            'docusign_assinado_em',
+        )
+        read_only_fields = fields
+
+
+class ParecerProcessoCreateSerializer(serializers.Serializer):
+    decisao = serializers.ChoiceField(choices=ParecerProcesso.Decisao.choices)
+    observacoes = serializers.CharField(required=False, allow_blank=True)
+
+
 class ProcessoHomologacaoResumoSerializer(serializers.ModelSerializer):
     prestador = PrestadorEmpresaSerializer(read_only=True)
     status_atual = serializers.CharField(source='status', read_only=True)
     pendencias = serializers.SerializerMethodField()
     documentos_enviados = serializers.SerializerMethodField()
     historico = HistoricoProcessoSerializer(many=True, read_only=True)
+    fluxo_aprovacao = FluxoAprovacaoSerializer(read_only=True)
+    pareceres = ParecerProcessoSerializer(many=True, read_only=True)
 
     class Meta:
         model = ProcessoHomologacao
@@ -220,6 +291,8 @@ class ProcessoHomologacaoResumoSerializer(serializers.ModelSerializer):
             'pendencias',
             'documentos_enviados',
             'historico',
+            'fluxo_aprovacao',
+            'pareceres',
         )
         read_only_fields = fields
 

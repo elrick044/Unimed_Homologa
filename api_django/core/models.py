@@ -195,6 +195,114 @@ class HistoricoProcesso(models.Model):
         return f'{self.processo_id} - {self.acao}'
 
 
+class FluxoAprovacao(models.Model):
+    class Status(models.TextChoices):
+        EM_ANDAMENTO = 'EM_ANDAMENTO', _('Em andamento')
+        CONCLUIDO = 'CONCLUIDO', _('Concluido')
+        ENCERRADO = 'ENCERRADO', _('Encerrado')
+
+    processo = models.OneToOneField(
+        ProcessoHomologacao,
+        on_delete=models.CASCADE,
+        related_name='fluxo_aprovacao',
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.EM_ANDAMENTO,
+    )
+    iniciado_em = models.DateTimeField(auto_now_add=True)
+    encerrado_em = models.DateTimeField(blank=True, null=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Fluxo de Aprovacao'
+        verbose_name_plural = 'Fluxos de Aprovacao'
+        ordering = ('-iniciado_em',)
+
+    def __str__(self):
+        return f'Fluxo do processo {self.processo_id}'
+
+
+class EtapaAprovacao(models.Model):
+    class Status(models.TextChoices):
+        AGUARDANDO = 'AGUARDANDO', _('Aguardando')
+        LIBERADO = 'LIBERADO', _('Liberado')
+        CONCLUIDO = 'CONCLUIDO', _('Concluido')
+
+    fluxo = models.ForeignKey(
+        FluxoAprovacao,
+        on_delete=models.CASCADE,
+        related_name='etapas',
+    )
+    aprovador = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name='etapas_aprovacao',
+    )
+    ordem = models.PositiveIntegerField()
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.AGUARDANDO,
+    )
+    data_liberacao = models.DateTimeField(blank=True, null=True)
+    data_conclusao = models.DateTimeField(blank=True, null=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Etapa de Aprovacao'
+        verbose_name_plural = 'Etapas de Aprovacao'
+        ordering = ('ordem',)
+        constraints = [
+            models.UniqueConstraint(fields=('fluxo', 'ordem'), name='unique_ordem_por_fluxo'),
+            models.UniqueConstraint(fields=('fluxo', 'aprovador'), name='unique_aprovador_por_fluxo'),
+        ]
+
+    def __str__(self):
+        return f'{self.fluxo_id} - {self.ordem} - {self.aprovador.email}'
+
+
+class ParecerProcesso(models.Model):
+    class Decisao(models.TextChoices):
+        APROVADO = 'APROVADO', _('Aprovado')
+        REPROVADO = 'REPROVADO', _('Reprovado')
+
+    processo = models.ForeignKey(
+        ProcessoHomologacao,
+        on_delete=models.CASCADE,
+        related_name='pareceres',
+    )
+    aprovador = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name='pareceres_emitidos',
+    )
+    etapa = models.OneToOneField(
+        EtapaAprovacao,
+        on_delete=models.SET_NULL,
+        related_name='parecer',
+        blank=True,
+        null=True,
+    )
+    decisao = models.CharField(max_length=20, choices=Decisao.choices)
+    observacoes = models.TextField(blank=True)
+    data_hora = models.DateTimeField(auto_now_add=True)
+    docusign_envelope_id = models.CharField(max_length=255, blank=True, null=True)
+    docusign_recipient_id = models.CharField(max_length=255, blank=True, null=True)
+    docusign_status = models.CharField(max_length=100, blank=True, null=True)
+    docusign_assinado_em = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        verbose_name = 'Parecer do Processo'
+        verbose_name_plural = 'Pareceres dos Processos'
+        ordering = ('data_hora',)
+
+    def __str__(self):
+        return f'{self.processo_id} - {self.aprovador.email} - {self.decisao}'
+
+
 class DocumentoPrestador(models.Model):
     class Status(models.TextChoices):
         ENVIADO = 'ENVIADO', _('Enviado')
