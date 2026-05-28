@@ -8,7 +8,7 @@ import {
   ExclamationTriangleIcon,
   XCircleIcon,
 } from "@heroicons/react/24/outline";
-import { Link, useParams } from "react-router-dom";
+import { Link, useOutletContext, useParams } from "react-router-dom";
 import { API_URL, api } from "../config/api";
 
 const documentStatusLabels = {
@@ -60,9 +60,11 @@ function getFileUrl(path) {
 function getApiMessage(data) {
   if (Array.isArray(data?.motivo_reprovacao)) return data.motivo_reprovacao.join(" ");
   if (Array.isArray(data?.status)) return data.status.join(" ");
+  if (Array.isArray(data?.processo)) return data.processo.join(" ");
+  if (Array.isArray(data?.decisao)) return data.decisao.join(" ");
   if (typeof data?.detail === "string") return data.detail;
 
-  return "Nao foi possivel validar o documento.";
+  return "Nao foi possivel concluir a acao.";
 }
 
 function StatusBadge({ status }) {
@@ -187,8 +189,198 @@ function VersionHistory({ versions }) {
   );
 }
 
+function ApprovalStepper({ fluxo }) {
+  const etapas = fluxo?.etapas || [];
+
+  if (!fluxo || !etapas.length) {
+    return (
+      <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-gray-950">Cadeia de aprovacao</h2>
+        <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+          A cadeia de aprovacao sera criada quando o processo entrar em aprovacao interna.
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-950">Cadeia de aprovacao</h2>
+          <p className="mt-1 text-sm text-gray-600">Fluxo {fluxo.status?.toLowerCase().replace("_", " ")}</p>
+        </div>
+      </div>
+
+      <ol className="mt-6 grid gap-4 lg:grid-cols-3">
+        {etapas.map((etapa) => {
+          const isDone = etapa.status === "CONCLUIDO";
+          const isCurrent = etapa.status === "LIBERADO";
+          const tone = isDone
+            ? "border-emerald-200 bg-emerald-50"
+            : isCurrent
+              ? "border-blue-300 bg-blue-50 ring-2 ring-blue-100"
+              : "border-gray-200 bg-gray-50";
+          const iconTone = isDone
+            ? "bg-emerald-600 text-white"
+            : isCurrent
+              ? "bg-blue-600 text-white"
+              : "bg-gray-200 text-gray-500";
+
+          return (
+            <li key={etapa.id} className={`rounded-lg border p-4 ${tone}`}>
+              <div className="flex items-start gap-3">
+                <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${iconTone}`}>
+                  {isDone ? <CheckCircleIcon className="h-5 w-5" /> : etapa.ordem}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-950">{etapa.aprovador_nome || etapa.aprovador_email}</p>
+                  <p className="mt-1 text-sm text-gray-600">
+                    {isDone ? "Parecer emitido" : isCurrent ? "Vez atual" : "Aguardando liberacao"}
+                  </p>
+                  <p className="mt-2 text-xs text-gray-500">
+                    {etapa.data_conclusao
+                      ? `Concluido em ${formatDate(etapa.data_conclusao)}`
+                      : etapa.data_liberacao
+                        ? `Liberado em ${formatDate(etapa.data_liberacao)}`
+                        : "Ainda nao liberado"}
+                  </p>
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+function ParecerPanel({
+  processo,
+  user,
+  observacoes,
+  setObservacoes,
+  isSubmitting,
+  errorMessage,
+  onSubmit,
+}) {
+  const etapaAtual = processo?.fluxo_aprovacao?.etapas?.find((etapa) => etapa.status === "LIBERADO");
+  const isInternalApproval = processo?.status_atual === "EM_APROVACAO_INTERNA";
+  const isCurrentApprover =
+    etapaAtual && (String(etapaAtual.aprovador) === String(user?.id) || etapaAtual.aprovador_email === user?.email);
+  const canApprove = isInternalApproval && isCurrentApprover;
+  const rejectDisabled = isSubmitting || !observacoes.trim();
+
+  if (!isInternalApproval) {
+    return (
+      <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-gray-950">Parecer do processo</h2>
+        <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+          O processo ainda nao esta em aprovacao interna.
+        </div>
+      </section>
+    );
+  }
+
+  if (!canApprove) {
+    return (
+      <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-gray-950">Parecer do processo</h2>
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          {etapaAtual
+            ? `Aguardando aprovacao de ${etapaAtual.aprovador_nome || etapaAtual.aprovador_email}.`
+            : "Nenhuma etapa esta liberada para parecer no momento."}
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-lg border border-blue-200 bg-blue-50 p-6 shadow-sm">
+      <h2 className="text-lg font-semibold text-gray-950">Emitir parecer</h2>
+      <p className="mt-1 text-sm text-gray-600">Esta etapa esta liberada para o seu usuario.</p>
+
+      <label className="mt-5 block">
+        <span className="mb-1 block text-sm font-medium text-gray-700">Observacoes do parecer</span>
+        <textarea
+          value={observacoes}
+          onChange={(event) => setObservacoes(event.target.value)}
+          rows="4"
+          className="block w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          placeholder="Registre a justificativa do parecer."
+        />
+      </label>
+
+      {errorMessage && (
+        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {errorMessage}
+        </div>
+      )}
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => onSubmit("APROVADO")}
+          disabled={isSubmitting}
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          {isSubmitting ? <ArrowPathIcon className="h-4 w-4 animate-spin" /> : <CheckCircleIcon className="h-5 w-5" />}
+          Aprovar processo
+        </button>
+        <button
+          type="button"
+          onClick={() => onSubmit("REPROVADO")}
+          disabled={rejectDisabled}
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-red-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          {isSubmitting ? <ArrowPathIcon className="h-4 w-4 animate-spin" /> : <XCircleIcon className="h-5 w-5" />}
+          Reprovar processo
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function ParecerHistory({ pareceres }) {
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+      <h2 className="text-lg font-semibold text-gray-950">Historico de pareceres</h2>
+      {pareceres?.length ? (
+        <ul className="mt-4 divide-y divide-gray-200">
+          {pareceres.map((parecer) => (
+            <li key={parecer.id} className="py-4 text-sm">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="font-semibold text-gray-950">{parecer.aprovador_email}</p>
+                  <p className="mt-1 text-gray-600">{parecer.observacoes || "Sem observacoes."}</p>
+                </div>
+                <div className="shrink-0 text-left sm:text-right">
+                  <span
+                    className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
+                      parecer.decisao === "APROVADO" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+                    }`}
+                  >
+                    {parecer.decisao === "APROVADO" ? "Aprovado" : "Reprovado"}
+                  </span>
+                  <p className="mt-2 text-xs text-gray-500">{formatDate(parecer.data_hora)}</p>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+          Nenhum parecer emitido ainda.
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function AdminProcessoDetalhe() {
   const { id } = useParams();
+  const { user } = useOutletContext();
+  const [processo, setProcesso] = useState(null);
   const [documentGroups, setDocumentGroups] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -196,24 +388,31 @@ export default function AdminProcessoDetalhe() {
   const [validationError, setValidationError] = useState("");
   const [validatingId, setValidatingId] = useState(null);
   const [rejectionDocument, setRejectionDocument] = useState(null);
+  const [parecerObservacoes, setParecerObservacoes] = useState("");
+  const [parecerError, setParecerError] = useState("");
+  const [isSubmittingParecer, setIsSubmittingParecer] = useState(false);
 
-  const loadDocuments = useCallback(async () => {
+  const loadProcessoDetalhe = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage("");
 
     try {
-      const { data } = await api.get(`/processos/${id}/documentos/`);
-      setDocumentGroups(data.documentos || []);
+      const [processoResponse, documentosResponse] = await Promise.all([
+        api.get(`/admin/processos/${id}/`),
+        api.get(`/processos/${id}/documentos/`),
+      ]);
+      setProcesso(processoResponse.data);
+      setDocumentGroups(documentosResponse.data.documentos || []);
     } catch (error) {
-      setErrorMessage(error.response?.data?.detail || "Nao foi possivel carregar os documentos do processo.");
+      setErrorMessage(error.response?.data?.detail || "Nao foi possivel carregar os detalhes do processo.");
     } finally {
       setIsLoading(false);
     }
   }, [id]);
 
   useEffect(() => {
-    loadDocuments();
-  }, [loadDocuments]);
+    loadProcessoDetalhe();
+  }, [loadProcessoDetalhe]);
 
   const totalPendingValidation = useMemo(
     () =>
@@ -231,11 +430,29 @@ export default function AdminProcessoDetalhe() {
     try {
       await api.post(`/admin/documentos/${document.id}/validar/`, payload);
       setRejectionDocument(null);
-      await loadDocuments();
+      await loadProcessoDetalhe();
     } catch (error) {
       setValidationError(getApiMessage(error.response?.data));
     } finally {
       setValidatingId(null);
+    }
+  };
+
+  const submitParecer = async (decisao) => {
+    setParecerError("");
+    setIsSubmittingParecer(true);
+
+    try {
+      await api.post(`/admin/processos/${id}/parecer/`, {
+        decisao,
+        observacoes: parecerObservacoes.trim(),
+      });
+      setParecerObservacoes("");
+      await loadProcessoDetalhe();
+    } catch (error) {
+      setParecerError(getApiMessage(error.response?.data));
+    } finally {
+      setIsSubmittingParecer(false);
     }
   };
 
@@ -270,7 +487,20 @@ export default function AdminProcessoDetalhe() {
             {errorMessage}
           </section>
         ) : (
-          <section className="space-y-4">
+          <div className="space-y-6">
+            <ApprovalStepper fluxo={processo?.fluxo_aprovacao} />
+            <ParecerPanel
+              processo={processo}
+              user={user}
+              observacoes={parecerObservacoes}
+              setObservacoes={setParecerObservacoes}
+              isSubmitting={isSubmittingParecer}
+              errorMessage={parecerError}
+              onSubmit={submitParecer}
+            />
+            <ParecerHistory pareceres={processo?.pareceres || []} />
+
+            <section className="space-y-4">
             {documentGroups.length ? (
               documentGroups.map((group) => {
                 const currentDocument = group.documento_atual;
@@ -383,7 +613,8 @@ export default function AdminProcessoDetalhe() {
                 Nenhum documento enviado para este processo.
               </div>
             )}
-          </section>
+            </section>
+          </div>
         )}
       </div>
 
