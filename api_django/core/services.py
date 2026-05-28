@@ -2,10 +2,21 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
-from .models import EtapaAprovacao, FluxoAprovacao, ParecerProcesso, ProcessoHomologacao, User
+from .models import ConfiguracaoFluxoPadrao, EtapaAprovacao, FluxoAprovacao, ParecerProcesso, ProcessoHomologacao, User
 
 
 def get_aprovadores_padrao():
+    configuracao = ConfiguracaoFluxoPadrao.objects.filter(ativo=True).prefetch_related(
+        'etapas__aprovador',
+    ).order_by('-atualizado_em').first()
+
+    if configuracao and configuracao.etapas.exists():
+        return [
+            etapa.aprovador
+            for etapa in configuracao.etapas.select_related('aprovador').order_by('ordem')
+            if etapa.aprovador.is_active
+        ]
+
     return User.objects.filter(
         perfil=User.Perfil.EQUIPE_ADMINISTRATIVA,
         is_active=True,

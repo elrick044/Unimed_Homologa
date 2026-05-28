@@ -3,6 +3,8 @@ from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
 from .models import (
     DocumentoPrestador,
+    ConfiguracaoFluxoPadrao,
+    EtapaConfiguracaoPadrao,
     EtapaAprovacao,
     FluxoAprovacao,
     HistoricoProcesso,
@@ -100,3 +102,22 @@ class ParecerProcessoAdmin(admin.ModelAdmin):
     list_display = ('processo', 'aprovador', 'decisao', 'data_hora')
     list_filter = ('decisao', 'data_hora')
     search_fields = ('processo__prestador__razao_social', 'aprovador__email', 'observacoes')
+
+
+class EtapaConfiguracaoPadraoInline(admin.TabularInline):
+    model = EtapaConfiguracaoPadrao
+    extra = 0
+
+
+@admin.register(ConfiguracaoFluxoPadrao)
+class ConfiguracaoFluxoPadraoAdmin(admin.ModelAdmin):
+    list_display = ('nome', 'ativo', 'criado_em', 'atualizado_em')
+    list_filter = ('ativo',)
+    search_fields = ('nome',)
+    inlines = (EtapaConfiguracaoPadraoInline,)
+
+
+@admin.register(EtapaConfiguracaoPadrao)
+class EtapaConfiguracaoPadraoAdmin(admin.ModelAdmin):
+    list_display = ('configuracao', 'ordem', 'aprovador')
+    search_fields = ('configuracao__nome', 'aprovador__email')

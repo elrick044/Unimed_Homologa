@@ -10,7 +10,9 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import (
+    ConfiguracaoFluxoPadrao,
     DocumentoPrestador,
+    EtapaConfiguracaoPadrao,
     EtapaAprovacao,
     FluxoAprovacao,
     HistoricoProcesso,
@@ -19,6 +21,11 @@ from .models import (
     ProcessoHomologacao,
     TipoDocumento,
 )
+
+
+def auth_client(client, user):
+    token = RefreshToken.for_user(user).access_token
+    client.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
 
 
 class PrestadorRegisterTests(APITestCase):
@@ -98,6 +105,210 @@ class LoginTests(APITestCase):
         self.assertEqual(response.data['id'], user.id)
         self.assertEqual(response.data['email'], 'admin@example.com')
         self.assertEqual(response.data['perfil'], get_user_model().Perfil.ADMINISTRADOR)
+
+
+class AdminConfigTests(APITestCase):
+    def setUp(self):
+        self.admin_user = get_user_model().objects.create_user(
+            email='system-admin@example.com',
+            password='SenhaForte123',
+            perfil=get_user_model().Perfil.ADMINISTRADOR,
+        )
+        auth_client(self.client, self.admin_user)
+
+    def test_prestador_cannot_access_config_routes(self):
+        prestador_user = get_user_model().objects.create_user(
+            email='config-prestador@example.com',
+            password='SenhaForte123',
+            perfil=get_user_model().Perfil.PRESTADOR,
+        )
+        auth_client(self.client, prestador_user)
+
+        response = self.client.get(reverse('admin-config-usuarios'))
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_administrative_team_cannot_access_config_routes(self):
+        equipe_user = get_user_model().objects.create_user(
+            email='config-equipe@example.com',
+            password='SenhaForte123',
+            perfil=get_user_model().Perfil.EQUIPE_ADMINISTRATIVA,
+        )
+        auth_client(self.client, equipe_user)
+
+        response = self.client.get(reverse('admin-config-documentos'))
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_system_admin_can_manage_internal_users(self):
+        create_response = self.client.post(
+            reverse('admin-config-usuarios'),
+            {
+                'email': 'nova-equipe@example.com',
+                'perfil': get_user_model().Perfil.EQUIPE_ADMINISTRATIVA,
+                'first_name': 'Nova',
+                'last_name': 'Equipe',
+                'is_active': True,
+                'password': 'SenhaForte123',
+            },
+            format='json',
+        )
+        user_id = create_response.data['id']
+
+        update_response = self.client.put(
+            reverse('admin-config-usuario-detail', kwargs={'id_usuario': user_id}),
+            {'first_name': 'Analista'},
+            format='json',
+        )
+        delete_response = self.client.delete(
+            reverse('admin-config-usuario-detail', kwargs={'id_usuario': user_id}),
+        )
+
+        user = get_user_model().objects.get(id=user_id)
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(update_response.data['first_name'], 'Analista')
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(user.is_active)
+
+    def test_system_admin_cannot_create_prestador_on_internal_user_route(self):
+        response = self.client.post(
+            reverse('admin-config-usuarios'),
+            {
+                'email': 'prestador-interno@example.com',
+                'perfil': get_user_model().Perfil.PRESTADOR,
+                'is_active': True,
+                'password': 'SenhaForte123',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('perfil', response.data)
+
+    def test_document_type_delete_is_soft_delete_and_keeps_documents(self):
+        tipo = TipoDocumento.objects.create(nome='Documento Critico', obrigatorio=True, ativo=True)
+        prestador_user = get_user_model().objects.create_user(
+            email='doc-config-prestador@example.com',
+            password='SenhaForte123',
+            perfil=get_user_model().Perfil.PRESTADOR,
+        )
+        prestador = PrestadorEmpresa.objects.create(
+            user=prestador_user,
+            razao_social='Config Docs LTDA',
+            nome_fantasia='Config Docs',
+            cnpj='33333333000193',
+            endereco='Rua D, 500',
+            nome_responsavel='Daniel Rocha',
+            email='doc-config-prestador@example.com',
+            telefone='11666666666',
+        )
+        processo = ProcessoHomologacao.objects.create(prestador=prestador)
+        DocumentoPrestador.objects.create(
+            prestador=prestador,
+            processo=processo,
+            tipo_documento=tipo,
+            arquivo='documentos/critico.pdf',
+            content_type='application/pdf',
+            tamanho_bytes=100,
+        )
+
+        response = self.client.delete(reverse('admin-config-documento-detail', kwargs={'id_tipo_documento': tipo.id}))
+
+        tipo.refresh_from_db()
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(tipo.ativo)
+        self.assertEqual(DocumentoPrestador.objects.filter(tipo_documento=tipo).count(), 1)
+
+    def test_system_admin_can_manage_document_types(self):
+        create_response = self.client.post(
+            reverse('admin-config-documentos'),
+            {'nome': 'Licenca Sanitaria', 'descricao': 'Licenca atualizada.', 'obrigatorio': True, 'ativo': True},
+            format='json',
+        )
+
+        update_response = self.client.put(
+            reverse('admin-config-documento-detail', kwargs={'id_tipo_documento': create_response.data['id']}),
+            {'obrigatorio': False},
+            format='json',
+        )
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+        self.assertFalse(update_response.data['obrigatorio'])
+
+    def test_system_admin_can_configure_default_approval_flow_order(self):
+        aprovador_1 = get_user_model().objects.create_user(
+            email='config-aprovador-1@example.com',
+            password='SenhaForte123',
+            perfil=get_user_model().Perfil.EQUIPE_ADMINISTRATIVA,
+        )
+        aprovador_2 = get_user_model().objects.create_user(
+            email='config-aprovador-2@example.com',
+            password='SenhaForte123',
+            perfil=get_user_model().Perfil.EQUIPE_ADMINISTRATIVA,
+        )
+
+        response = self.client.post(
+            reverse('admin-config-fluxos'),
+            {
+                'nome': 'Fluxo Padrao Assistencial',
+                'ativo': True,
+                'etapas': [
+                    {'aprovador': aprovador_2.id, 'ordem': 1},
+                    {'aprovador': aprovador_1.id, 'ordem': 2},
+                ],
+            },
+            format='json',
+        )
+
+        configuracao = ConfiguracaoFluxoPadrao.objects.get(id=response.data['id'])
+        etapas = list(configuracao.etapas.order_by('ordem'))
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(etapas[0].aprovador, aprovador_2)
+        self.assertEqual(etapas[1].aprovador, aprovador_1)
+
+    def test_active_flow_config_drives_generated_approval_chain(self):
+        aprovador_1 = get_user_model().objects.create_user(
+            email='config-chain-1@example.com',
+            password='SenhaForte123',
+            perfil=get_user_model().Perfil.EQUIPE_ADMINISTRATIVA,
+        )
+        aprovador_2 = get_user_model().objects.create_user(
+            email='config-chain-2@example.com',
+            password='SenhaForte123',
+            perfil=get_user_model().Perfil.EQUIPE_ADMINISTRATIVA,
+        )
+        configuracao = ConfiguracaoFluxoPadrao.objects.create(nome='Fluxo Ativo', ativo=True)
+        EtapaConfiguracaoPadrao.objects.create(configuracao=configuracao, aprovador=aprovador_2, ordem=1)
+        EtapaConfiguracaoPadrao.objects.create(configuracao=configuracao, aprovador=aprovador_1, ordem=2)
+        prestador_user = get_user_model().objects.create_user(
+            email='config-chain-prestador@example.com',
+            password='SenhaForte123',
+            perfil=get_user_model().Perfil.PRESTADOR,
+        )
+        prestador = PrestadorEmpresa.objects.create(
+            user=prestador_user,
+            razao_social='Config Chain LTDA',
+            nome_fantasia='Config Chain',
+            cnpj='44444444000194',
+            endereco='Rua E, 600',
+            nome_responsavel='Elaine Moraes',
+            email='config-chain-prestador@example.com',
+            telefone='11555555555',
+        )
+
+        processo = ProcessoHomologacao.objects.create(
+            prestador=prestador,
+            status=ProcessoHomologacao.Status.EM_APROVACAO_INTERNA,
+        )
+        etapas = list(processo.fluxo_aprovacao.etapas.order_by('ordem'))
+
+        self.assertEqual(etapas[0].aprovador, aprovador_2)
+        self.assertEqual(etapas[1].aprovador, aprovador_1)
 
 
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp())

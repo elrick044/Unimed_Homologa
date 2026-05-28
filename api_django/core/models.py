@@ -303,6 +303,47 @@ class ParecerProcesso(models.Model):
         return f'{self.processo_id} - {self.aprovador.email} - {self.decisao}'
 
 
+class ConfiguracaoFluxoPadrao(models.Model):
+    nome = models.CharField(max_length=150, unique=True)
+    ativo = models.BooleanField(default=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Configuracao de Fluxo Padrao'
+        verbose_name_plural = 'Configuracoes de Fluxo Padrao'
+        ordering = ('nome',)
+
+    def __str__(self):
+        return self.nome
+
+
+class EtapaConfiguracaoPadrao(models.Model):
+    configuracao = models.ForeignKey(
+        ConfiguracaoFluxoPadrao,
+        on_delete=models.CASCADE,
+        related_name='etapas',
+    )
+    aprovador = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name='etapas_configuracao_padrao',
+    )
+    ordem = models.PositiveIntegerField()
+
+    class Meta:
+        verbose_name = 'Etapa de Configuracao Padrao'
+        verbose_name_plural = 'Etapas de Configuracao Padrao'
+        ordering = ('ordem',)
+        constraints = [
+            models.UniqueConstraint(fields=('configuracao', 'ordem'), name='unique_ordem_por_configuracao_fluxo'),
+            models.UniqueConstraint(fields=('configuracao', 'aprovador'), name='unique_aprovador_por_configuracao_fluxo'),
+        ]
+
+    def __str__(self):
+        return f'{self.configuracao_id} - {self.ordem} - {self.aprovador.email}'
+
+
 class DocumentoPrestador(models.Model):
     class Status(models.TextChoices):
         ENVIADO = 'ENVIADO', _('Enviado')

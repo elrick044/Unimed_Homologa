@@ -30,6 +30,21 @@ Endpoints autenticados atuais:
 - `GET /api/processos/<id_processo>/documentos/`
 - `POST /api/admin/processos/<id_processo>/parecer/`
 - `POST /api/admin/documentos/<id_documento>/validar/`
+- `GET /api/admin/config/usuarios/`
+- `POST /api/admin/config/usuarios/`
+- `GET /api/admin/config/usuarios/<id_usuario>/`
+- `PUT /api/admin/config/usuarios/<id_usuario>/`
+- `DELETE /api/admin/config/usuarios/<id_usuario>/`
+- `GET /api/admin/config/documentos/`
+- `POST /api/admin/config/documentos/`
+- `GET /api/admin/config/documentos/<id_tipo_documento>/`
+- `PUT /api/admin/config/documentos/<id_tipo_documento>/`
+- `DELETE /api/admin/config/documentos/<id_tipo_documento>/`
+- `GET /api/admin/config/fluxos/`
+- `POST /api/admin/config/fluxos/`
+- `GET /api/admin/config/fluxos/<id_fluxo>/`
+- `PUT /api/admin/config/fluxos/<id_fluxo>/`
+- `DELETE /api/admin/config/fluxos/<id_fluxo>/`
 
 ## POST /api/auth/register/prestador/
 
@@ -707,6 +722,282 @@ Exemplo:
 }
 ```
 
+## GET /api/admin/config/usuarios/
+
+Lista usuarios internos. Requer perfil `ADMINISTRADOR`.
+
+### Response 200
+
+```json
+{
+  "usuarios": [
+    {
+      "id": 10,
+      "email": "analista@example.com",
+      "perfil": "EQUIPE_ADMINISTRATIVA",
+      "first_name": "Ana",
+      "last_name": "Silva",
+      "nome": "Ana Silva",
+      "is_active": true,
+      "date_joined": "2026-05-27T10:00:00Z",
+      "last_login": null
+    }
+  ]
+}
+```
+
+## POST /api/admin/config/usuarios/
+
+Cria usuario interno. Requer perfil `ADMINISTRADOR`.
+
+### Request
+
+```json
+{
+  "email": "analista@example.com",
+  "perfil": "EQUIPE_ADMINISTRATIVA",
+  "first_name": "Ana",
+  "last_name": "Silva",
+  "is_active": true,
+  "password": "SenhaForte123"
+}
+```
+
+### Regras
+
+- `perfil` aceita apenas `EQUIPE_ADMINISTRATIVA` ou `ADMINISTRADOR`.
+- `password` e obrigatorio na criacao.
+
+### Response 201
+
+Retorna o usuario criado, sem a senha.
+
+## GET /api/admin/config/usuarios/<id_usuario>/
+
+Detalha um usuario interno. Requer perfil `ADMINISTRADOR`.
+
+## PUT /api/admin/config/usuarios/<id_usuario>/
+
+Atualiza um usuario interno. Requer perfil `ADMINISTRADOR`.
+
+### Request
+
+```json
+{
+  "first_name": "Analista",
+  "is_active": true
+}
+```
+
+### Response 200
+
+Retorna o usuario atualizado.
+
+## DELETE /api/admin/config/usuarios/<id_usuario>/
+
+Inativa logicamente um usuario interno, definindo `is_active=false`. Requer perfil `ADMINISTRADOR`.
+
+### Response 204
+
+Sem corpo.
+
+## GET /api/admin/config/documentos/
+
+Lista todos os tipos de documento, ativos e inativos. Requer perfil `ADMINISTRADOR`.
+
+### Response 200
+
+```json
+{
+  "documentos": [
+    {
+      "id": 1,
+      "nome": "Contrato Social",
+      "descricao": "Documento de constituicao da empresa.",
+      "obrigatorio": true,
+      "ativo": true,
+      "criado_em": "2026-05-27T10:00:00Z",
+      "atualizado_em": "2026-05-27T10:00:00Z"
+    }
+  ]
+}
+```
+
+## POST /api/admin/config/documentos/
+
+Cria um tipo de documento. Requer perfil `ADMINISTRADOR`.
+
+### Request
+
+```json
+{
+  "nome": "Licenca Sanitaria",
+  "descricao": "Licenca sanitaria atualizada.",
+  "obrigatorio": true,
+  "ativo": true
+}
+```
+
+### Response 201
+
+Retorna o tipo criado.
+
+## GET /api/admin/config/documentos/<id_tipo_documento>/
+
+Detalha um tipo de documento. Requer perfil `ADMINISTRADOR`.
+
+## PUT /api/admin/config/documentos/<id_tipo_documento>/
+
+Atualiza nome, descricao, obrigatoriedade ou status ativo. Requer perfil `ADMINISTRADOR`.
+
+### Request
+
+```json
+{
+  "obrigatorio": false,
+  "ativo": true
+}
+```
+
+### Response 200
+
+Retorna o tipo atualizado.
+
+## DELETE /api/admin/config/documentos/<id_tipo_documento>/
+
+Inativa logicamente um tipo de documento, definindo `ativo=false`. Requer perfil `ADMINISTRADOR`.
+
+Observacao:
+
+- Esta rota nao apaga documentos ja enviados. Documentos historicos permanecem vinculados ao tipo.
+
+### Response 204
+
+Sem corpo.
+
+## GET /api/admin/config/fluxos/
+
+Lista configuracoes de fluxo padrao. Requer perfil `ADMINISTRADOR`.
+
+### Response 200
+
+```json
+{
+  "fluxos": [
+    {
+      "id": 1,
+      "nome": "Fluxo Padrao Assistencial",
+      "ativo": true,
+      "etapas": [
+        {
+          "id": 1,
+          "aprovador": 20,
+          "aprovador_email": "aprovador1@example.com",
+          "aprovador_nome": "aprovador1@example.com",
+          "ordem": 1
+        }
+      ],
+      "criado_em": "2026-05-27T10:00:00Z",
+      "atualizado_em": "2026-05-27T10:00:00Z"
+    }
+  ]
+}
+```
+
+## POST /api/admin/config/fluxos/
+
+Cria configuracao padrao da cadeia de aprovacao. Requer perfil `ADMINISTRADOR`.
+
+### Request
+
+```json
+{
+  "nome": "Fluxo Padrao Assistencial",
+  "ativo": true,
+  "etapas": [
+    {
+      "aprovador": 20,
+      "ordem": 1
+    },
+    {
+      "aprovador": 21,
+      "ordem": 2
+    }
+  ]
+}
+```
+
+### Regras
+
+- Deve haver ao menos uma etapa.
+- `aprovador` deve ser usuario ativo com perfil `EQUIPE_ADMINISTRATIVA`.
+- `ordem` nao pode repetir dentro da mesma configuracao.
+- O mesmo aprovador nao pode repetir dentro da mesma configuracao.
+- Quando uma configuracao e criada ou atualizada como `ativo=true`, as demais configuracoes sao marcadas como `ativo=false`.
+
+### Response 201
+
+Retorna a configuracao criada.
+
+## GET /api/admin/config/fluxos/<id_fluxo>/
+
+Detalha uma configuracao de fluxo. Requer perfil `ADMINISTRADOR`.
+
+## PUT /api/admin/config/fluxos/<id_fluxo>/
+
+Atualiza nome, status ativo e substitui a lista de etapas quando `etapas` for enviada. Requer perfil `ADMINISTRADOR`.
+
+### Request
+
+```json
+{
+  "ativo": true,
+  "etapas": [
+    {
+      "aprovador": 21,
+      "ordem": 1
+    },
+    {
+      "aprovador": 20,
+      "ordem": 2
+    }
+  ]
+}
+```
+
+### Response 200
+
+Retorna a configuracao atualizada.
+
+## DELETE /api/admin/config/fluxos/<id_fluxo>/
+
+Inativa uma configuracao de fluxo, definindo `ativo=false`. Requer perfil `ADMINISTRADOR`.
+
+### Response 204
+
+Sem corpo.
+
+### Observabilidade das Configuracoes
+
+Mudancas administrativas registram logs estruturados com `actor_id`, estado anterior e novo estado quando aplicavel:
+
+- `config_user_created`
+- `config_user_updated`
+- `config_user_deactivated`
+- `config_document_type_created`
+- `config_document_type_updated`
+- `config_document_type_deactivated`
+- `config_approval_flow_created`
+- `config_approval_flow_updated`
+- `config_approval_flow_deactivated`
+
+### Respostas de Permissao
+
+Todas as rotas `/api/admin/config/...` retornam:
+
+- `401` quando o token JWT esta ausente, invalido ou expirado.
+- `403` quando o usuario autenticado nao possui perfil `ADMINISTRADOR`.
+
 ## POST /api/admin/documentos/<id_documento>/validar/
 
 Valida individualmente um documento enviado. Apenas usuarios com perfil `EQUIPE_ADMINISTRATIVA` ou `ADMINISTRADOR` podem acessar.
@@ -964,6 +1255,23 @@ Regras:
 | `docusign_recipient_id` | Campo previsto para integracao futura com DocuSign |
 | `docusign_status` | Campo previsto para integracao futura com DocuSign |
 | `docusign_assinado_em` | Campo previsto para integracao futura com DocuSign |
+
+### ConfiguracaoFluxoPadrao
+
+| Campo | Descricao |
+| --- | --- |
+| `nome` | Nome da configuracao padrao |
+| `ativo` | Indica se a configuracao sera usada para novos fluxos |
+| `criado_em` | Data de criacao |
+| `atualizado_em` | Data da ultima atualizacao |
+
+### EtapaConfiguracaoPadrao
+
+| Campo | Descricao |
+| --- | --- |
+| `configuracao` | Configuracao de fluxo vinculada |
+| `aprovador` | Usuario da equipe administrativa que aprovara nessa posicao |
+| `ordem` | Ordem sequencial da etapa |
 
 ## Permissoes
 

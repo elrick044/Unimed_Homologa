@@ -12,9 +12,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import DocumentoPrestador, ParecerProcesso, ProcessoHomologacao, TipoDocumento, User
-from .permissions import CanAccessProcess, IsAdministrativeTeam
+from .models import ConfiguracaoFluxoPadrao, DocumentoPrestador, ParecerProcesso, ProcessoHomologacao, TipoDocumento, User
+from .permissions import CanAccessProcess, IsAdministrativeTeam, IsSystemAdmin
 from .serializers import (
+    ConfiguracaoFluxoPadraoSerializer,
     DocumentoPrestadorHistoricoSerializer,
     DocumentoPrestadorSerializer,
     DocumentoValidacaoSerializer,
@@ -25,7 +26,9 @@ from .serializers import (
     PrestadorRegisterSerializer,
     ProcessoHomologacaoListSerializer,
     ProcessoHomologacaoResumoSerializer,
+    TipoDocumentoConfigSerializer,
     TipoDocumentoSerializer,
+    UsuarioInternoConfigSerializer,
     UserSessionSerializer,
 )
 from .services import emitir_parecer_processo
@@ -40,6 +43,10 @@ def log_upload_event(event, **payload):
 
 
 def log_parecer_event(event, **payload):
+    logger.info(json.dumps({'event': event, **payload}, ensure_ascii=False))
+
+
+def log_config_event(event, **payload):
     logger.info(json.dumps({'event': event, **payload}, ensure_ascii=False))
 
 
@@ -506,3 +513,205 @@ class AdminProcessoParecerView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+class AdminConfigUsuarioListCreateView(APIView):
+    permission_classes = (IsAuthenticated, IsSystemAdmin)
+
+    def get(self, request):
+        usuarios = User.objects.filter(
+            perfil__in=(User.Perfil.EQUIPE_ADMINISTRATIVA, User.Perfil.ADMINISTRADOR),
+        ).order_by('email')
+        return Response(
+            {'usuarios': UsuarioInternoConfigSerializer(usuarios, many=True).data},
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request):
+        serializer = UsuarioInternoConfigSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        usuario = serializer.save()
+        log_config_event(
+            'config_user_created',
+            actor_id=request.user.id,
+            user_id=usuario.id,
+            new_state=UsuarioInternoConfigSerializer(usuario).data,
+        )
+        return Response(UsuarioInternoConfigSerializer(usuario).data, status=status.HTTP_201_CREATED)
+
+
+class AdminConfigUsuarioDetailView(APIView):
+    permission_classes = (IsAuthenticated, IsSystemAdmin)
+
+    def get_object(self, id_usuario):
+        return get_object_or_404(
+            User,
+            id=id_usuario,
+            perfil__in=(User.Perfil.EQUIPE_ADMINISTRATIVA, User.Perfil.ADMINISTRADOR),
+        )
+
+    def get(self, request, id_usuario):
+        usuario = self.get_object(id_usuario)
+        return Response(UsuarioInternoConfigSerializer(usuario).data, status=status.HTTP_200_OK)
+
+    def put(self, request, id_usuario):
+        usuario = self.get_object(id_usuario)
+        previous_state = UsuarioInternoConfigSerializer(usuario).data
+        serializer = UsuarioInternoConfigSerializer(usuario, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        usuario = serializer.save()
+        new_state = UsuarioInternoConfigSerializer(usuario).data
+        log_config_event(
+            'config_user_updated',
+            actor_id=request.user.id,
+            user_id=usuario.id,
+            previous_state=previous_state,
+            new_state=new_state,
+        )
+        return Response(new_state, status=status.HTTP_200_OK)
+
+    def delete(self, request, id_usuario):
+        usuario = self.get_object(id_usuario)
+        previous_state = UsuarioInternoConfigSerializer(usuario).data
+        usuario.is_active = False
+        usuario.save(update_fields=('is_active',))
+        new_state = UsuarioInternoConfigSerializer(usuario).data
+        log_config_event(
+            'config_user_deactivated',
+            actor_id=request.user.id,
+            user_id=usuario.id,
+            previous_state=previous_state,
+            new_state=new_state,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class AdminConfigDocumentoListCreateView(APIView):
+    permission_classes = (IsAuthenticated, IsSystemAdmin)
+
+    def get(self, request):
+        documentos = TipoDocumento.objects.all().order_by('nome')
+        return Response(
+            {'documentos': TipoDocumentoConfigSerializer(documentos, many=True).data},
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request):
+        serializer = TipoDocumentoConfigSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        documento = serializer.save()
+        log_config_event(
+            'config_document_type_created',
+            actor_id=request.user.id,
+            document_type_id=documento.id,
+            new_state=TipoDocumentoConfigSerializer(documento).data,
+        )
+        return Response(TipoDocumentoConfigSerializer(documento).data, status=status.HTTP_201_CREATED)
+
+
+class AdminConfigDocumentoDetailView(APIView):
+    permission_classes = (IsAuthenticated, IsSystemAdmin)
+
+    def get_object(self, id_tipo_documento):
+        return get_object_or_404(TipoDocumento, id=id_tipo_documento)
+
+    def get(self, request, id_tipo_documento):
+        documento = self.get_object(id_tipo_documento)
+        return Response(TipoDocumentoConfigSerializer(documento).data, status=status.HTTP_200_OK)
+
+    def put(self, request, id_tipo_documento):
+        documento = self.get_object(id_tipo_documento)
+        previous_state = TipoDocumentoConfigSerializer(documento).data
+        serializer = TipoDocumentoConfigSerializer(documento, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        documento = serializer.save()
+        new_state = TipoDocumentoConfigSerializer(documento).data
+        log_config_event(
+            'config_document_type_updated',
+            actor_id=request.user.id,
+            document_type_id=documento.id,
+            previous_state=previous_state,
+            new_state=new_state,
+        )
+        return Response(new_state, status=status.HTTP_200_OK)
+
+    def delete(self, request, id_tipo_documento):
+        documento = self.get_object(id_tipo_documento)
+        previous_state = TipoDocumentoConfigSerializer(documento).data
+        documento.ativo = False
+        documento.save(update_fields=('ativo', 'atualizado_em'))
+        new_state = TipoDocumentoConfigSerializer(documento).data
+        log_config_event(
+            'config_document_type_deactivated',
+            actor_id=request.user.id,
+            document_type_id=documento.id,
+            previous_state=previous_state,
+            new_state=new_state,
+            critical=bool(previous_state.get('obrigatorio')),
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class AdminConfigFluxoListCreateView(APIView):
+    permission_classes = (IsAuthenticated, IsSystemAdmin)
+
+    def get(self, request):
+        fluxos = ConfiguracaoFluxoPadrao.objects.prefetch_related('etapas__aprovador').order_by('nome')
+        return Response(
+            {'fluxos': ConfiguracaoFluxoPadraoSerializer(fluxos, many=True).data},
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request):
+        serializer = ConfiguracaoFluxoPadraoSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        fluxo = serializer.save()
+        log_config_event(
+            'config_approval_flow_created',
+            actor_id=request.user.id,
+            flow_config_id=fluxo.id,
+            new_state=ConfiguracaoFluxoPadraoSerializer(fluxo).data,
+        )
+        return Response(ConfiguracaoFluxoPadraoSerializer(fluxo).data, status=status.HTTP_201_CREATED)
+
+
+class AdminConfigFluxoDetailView(APIView):
+    permission_classes = (IsAuthenticated, IsSystemAdmin)
+
+    def get_object(self, id_fluxo):
+        return get_object_or_404(ConfiguracaoFluxoPadrao, id=id_fluxo)
+
+    def get(self, request, id_fluxo):
+        fluxo = self.get_object(id_fluxo)
+        return Response(ConfiguracaoFluxoPadraoSerializer(fluxo).data, status=status.HTTP_200_OK)
+
+    def put(self, request, id_fluxo):
+        fluxo = self.get_object(id_fluxo)
+        previous_state = ConfiguracaoFluxoPadraoSerializer(fluxo).data
+        serializer = ConfiguracaoFluxoPadraoSerializer(fluxo, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        fluxo = serializer.save()
+        new_state = ConfiguracaoFluxoPadraoSerializer(fluxo).data
+        log_config_event(
+            'config_approval_flow_updated',
+            actor_id=request.user.id,
+            flow_config_id=fluxo.id,
+            previous_state=previous_state,
+            new_state=new_state,
+        )
+        return Response(new_state, status=status.HTTP_200_OK)
+
+    def delete(self, request, id_fluxo):
+        fluxo = self.get_object(id_fluxo)
+        previous_state = ConfiguracaoFluxoPadraoSerializer(fluxo).data
+        fluxo.ativo = False
+        fluxo.save(update_fields=('ativo', 'atualizado_em'))
+        new_state = ConfiguracaoFluxoPadraoSerializer(fluxo).data
+        log_config_event(
+            'config_approval_flow_deactivated',
+            actor_id=request.user.id,
+            flow_config_id=fluxo.id,
+            previous_state=previous_state,
+            new_state=new_state,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)

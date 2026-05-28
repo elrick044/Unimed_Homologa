@@ -6,7 +6,9 @@ from django.db import transaction
 from rest_framework import serializers
 
 from .models import (
+    ConfiguracaoFluxoPadrao,
     DocumentoPrestador,
+    EtapaConfiguracaoPadrao,
     EtapaAprovacao,
     FluxoAprovacao,
     HistoricoProcesso,
@@ -143,7 +145,69 @@ class UserSessionSerializer(serializers.ModelSerializer):
         return obj.email
 
 
+class UsuarioInternoConfigSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, required=False, min_length=8, style={'input_type': 'password'})
+    nome = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = User
+        fields = (
+            'id',
+            'email',
+            'perfil',
+            'first_name',
+            'last_name',
+            'nome',
+            'is_active',
+            'password',
+            'date_joined',
+            'last_login',
+        )
+        read_only_fields = ('id', 'nome', 'date_joined', 'last_login')
+
+    def get_nome(self, obj):
+        return obj.get_full_name() or obj.email
+
+    def validate_perfil(self, value):
+        if value not in (User.Perfil.EQUIPE_ADMINISTRATIVA, User.Perfil.ADMINISTRADOR):
+            raise serializers.ValidationError('Apenas usuarios internos podem ser gerenciados por esta rota.')
+
+        return value
+
+    def validate(self, attrs):
+        if self.instance is None and not attrs.get('password'):
+            raise serializers.ValidationError({'password': ['Informe uma senha inicial.']})
+
+        return attrs
+
+    def create(self, validated_data):
+        password = validated_data.pop('password')
+        user = User(**validated_data)
+        user.set_password(password)
+        user.save()
+        return user
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop('password', None)
+
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+
+        if password:
+            instance.set_password(password)
+
+        instance.save()
+        return instance
+
+
 class TipoDocumentoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TipoDocumento
+        fields = ('id', 'nome', 'descricao', 'obrigatorio', 'ativo', 'criado_em', 'atualizado_em')
+        read_only_fields = ('id', 'criado_em', 'atualizado_em')
+
+
+class TipoDocumentoConfigSerializer(serializers.ModelSerializer):
     class Meta:
         model = TipoDocumento
         fields = ('id', 'nome', 'descricao', 'obrigatorio', 'ativo', 'criado_em', 'atualizado_em')
@@ -268,6 +332,79 @@ class ParecerProcessoSerializer(serializers.ModelSerializer):
 class ParecerProcessoCreateSerializer(serializers.Serializer):
     decisao = serializers.ChoiceField(choices=ParecerProcesso.Decisao.choices)
     observacoes = serializers.CharField(required=False, allow_blank=True)
+
+
+class EtapaConfiguracaoPadraoSerializer(serializers.ModelSerializer):
+    aprovador_email = serializers.EmailField(source='aprovador.email', read_only=True)
+    aprovador_nome = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EtapaConfiguracaoPadrao
+        fields = ('id', 'aprovador', 'aprovador_email', 'aprovador_nome', 'ordem')
+        read_only_fields = ('id', 'aprovador_email', 'aprovador_nome')
+
+    def get_aprovador_nome(self, obj):
+        return obj.aprovador.get_full_name() or obj.aprovador.email
+
+    def validate_aprovador(self, value):
+        if value.perfil != User.Perfil.EQUIPE_ADMINISTRATIVA or not value.is_active:
+            raise serializers.ValidationError('O aprovador deve ser um usuario ativo da equipe administrativa.')
+
+        return value
+
+
+class ConfiguracaoFluxoPadraoSerializer(serializers.ModelSerializer):
+    etapas = EtapaConfiguracaoPadraoSerializer(many=True)
+
+    class Meta:
+        model = ConfiguracaoFluxoPadrao
+        fields = ('id', 'nome', 'ativo', 'etapas', 'criado_em', 'atualizado_em')
+        read_only_fields = ('id', 'criado_em', 'atualizado_em')
+
+    def validate_etapas(self, etapas):
+        if not etapas:
+            raise serializers.ValidationError('Informe ao menos uma etapa de aprovacao.')
+
+        ordens = [etapa['ordem'] for etapa in etapas]
+        if len(ordens) != len(set(ordens)):
+            raise serializers.ValidationError('A ordem das etapas nao pode se repetir.')
+
+        aprovadores = [etapa['aprovador'].id for etapa in etapas]
+        if len(aprovadores) != len(set(aprovadores)):
+            raise serializers.ValidationError('Um aprovador nao pode se repetir na mesma configuracao.')
+
+        return etapas
+
+    @transaction.atomic
+    def create(self, validated_data):
+        etapas_data = validated_data.pop('etapas')
+        configuracao = ConfiguracaoFluxoPadrao.objects.create(**validated_data)
+        self._replace_etapas(configuracao, etapas_data)
+        self._ensure_single_active(configuracao)
+        return configuracao
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        etapas_data = validated_data.pop('etapas', None)
+
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        instance.save()
+
+        if etapas_data is not None:
+            self._replace_etapas(instance, etapas_data)
+
+        self._ensure_single_active(instance)
+        return instance
+
+    def _replace_etapas(self, configuracao, etapas_data):
+        configuracao.etapas.all().delete()
+        for etapa_data in sorted(etapas_data, key=lambda item: item['ordem']):
+            EtapaConfiguracaoPadrao.objects.create(configuracao=configuracao, **etapa_data)
+
+    def _ensure_single_active(self, configuracao):
+        if configuracao.ativo:
+            ConfiguracaoFluxoPadrao.objects.exclude(id=configuracao.id).update(ativo=False)
 
 
 class ProcessoHomologacaoResumoSerializer(serializers.ModelSerializer):
