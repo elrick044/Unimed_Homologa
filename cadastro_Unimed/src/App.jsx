@@ -8,6 +8,7 @@ import AdminProcessoDetalhe from "./pages/AdminProcessoDetalhe";
 import AdminUsuarios from "./pages/AdminUsuarios";
 import AdminDocumentos from "./pages/AdminDocumentos";
 import AdminFluxo from "./pages/AdminFluxo";
+import AdminTemplates from "./pages/AdminTemplates";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Layout from "./layout/layout";
 
@@ -31,6 +32,7 @@ function App() {
             <Route path="/admin/config/usuarios" element={<AdminUsuarios />} />
             <Route path="/admin/config/documentos" element={<AdminDocumentos />} />
             <Route path="/admin/config/fluxo" element={<AdminFluxo />} />
+            <Route path="/admin/config/templates" element={<AdminTemplates />} />
           </Route>
         </Route>
       </Routes>

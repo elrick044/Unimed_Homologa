@@ -28,6 +28,7 @@ Endpoints autenticados atuais:
 - `POST /api/documentos/upload/`
 - `GET /api/admin/processos/`
 - `GET /api/processos/<id_processo>/documentos/`
+- `GET /api/processos/<id_processo>/minuta/download/`
 - `POST /api/admin/processos/<id_processo>/parecer/`
 - `POST /api/admin/documentos/<id_documento>/validar/`
 - `GET /api/admin/config/usuarios/`
@@ -45,6 +46,11 @@ Endpoints autenticados atuais:
 - `GET /api/admin/config/fluxos/<id_fluxo>/`
 - `PUT /api/admin/config/fluxos/<id_fluxo>/`
 - `DELETE /api/admin/config/fluxos/<id_fluxo>/`
+- `GET /api/admin/config/templates/`
+- `POST /api/admin/config/templates/`
+- `GET /api/admin/config/templates/<id_template>/`
+- `PUT /api/admin/config/templates/<id_template>/`
+- `DELETE /api/admin/config/templates/<id_template>/`
 
 ## POST /api/auth/register/prestador/
 
@@ -546,6 +552,39 @@ Retornado quando o token JWT esta ausente, invalido ou expirado.
 
 Retornado quando o usuario nao possui acesso ao processo informado.
 
+## GET /api/processos/<id_processo>/minuta/download/
+
+Baixa o PDF da minuta gerada para o processo.
+
+Requer autenticacao JWT. Prestadores acessam apenas a minuta do proprio processo; usuarios com perfil `EQUIPE_ADMINISTRATIVA` ou `ADMINISTRADOR` podem acessar minutas de qualquer processo.
+
+### Headers
+
+```http
+Authorization: Bearer <access_token>
+```
+
+### Response 200
+
+Retorna o arquivo PDF como download.
+
+```http
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="minuta_processo_1.pdf"
+```
+
+### Response 401
+
+Retornado quando o token JWT esta ausente, invalido ou expirado.
+
+### Response 403
+
+Retornado quando o usuario nao possui acesso ao processo informado.
+
+### Response 404
+
+Retornado quando o processo nao existe ou ainda nao possui minuta gerada.
+
 ## GET /api/admin/processos/
 
 Lista todos os processos de homologacao para uso administrativo.
@@ -977,6 +1016,99 @@ Inativa uma configuracao de fluxo, definindo `ativo=false`. Requer perfil `ADMIN
 
 Sem corpo.
 
+## GET /api/admin/config/templates/
+
+Lista templates de contrato, incluindo versoes inativas. Requer perfil `ADMINISTRADOR`.
+
+### Response 200
+
+```json
+{
+  "templates": [
+    {
+      "id": 2,
+      "nome": "Contrato Prestador",
+      "conteudo_html": "<h1>{{ razao_social }}</h1><p>CNPJ {{ cnpj }}</p>",
+      "ativo": true,
+      "versao": 2,
+      "template_anterior": 1,
+      "criado_em": "2026-06-03T10:00:00Z",
+      "atualizado_em": "2026-06-03T10:00:00Z"
+    }
+  ]
+}
+```
+
+## POST /api/admin/config/templates/
+
+Cria um template de contrato. Requer perfil `ADMINISTRADOR`.
+
+### Request
+
+```json
+{
+  "nome": "Contrato Prestador",
+  "conteudo_html": "<h1>{{ razao_social }}</h1><p>CNPJ {{ cnpj }}</p>",
+  "ativo": true
+}
+```
+
+### Response 201
+
+Retorna o template criado. Quando criado como `ativo=true`, os demais templates ativos sao inativados.
+
+## GET /api/admin/config/templates/<id_template>/
+
+Detalha uma versao de template. Requer perfil `ADMINISTRADOR`.
+
+## PUT /api/admin/config/templates/<id_template>/
+
+Atualiza um template. Requer perfil `ADMINISTRADOR`.
+
+### Regras de versionamento
+
+- Se o template editado estiver ativo, a API cria uma nova versao com `versao` incrementada e `template_anterior` apontando para a versao anterior.
+- A versao anterior e marcada como `ativo=false`.
+- Minutas ja geradas continuam vinculadas ao `TemplateContrato` usado no momento da geracao.
+- Se a nova versao for salva como `ativo=true`, os demais templates ativos sao inativados.
+
+### Request
+
+```json
+{
+  "conteudo_html": "<h1>{{ razao_social }}</h1><p>CNPJ {{ cnpj }}</p><p>{{ endereco }}</p>"
+}
+```
+
+### Response 200
+
+Retorna a nova versao do template quando o template anterior estava ativo.
+
+## DELETE /api/admin/config/templates/<id_template>/
+
+Inativa uma versao de template, definindo `ativo=false`. Requer perfil `ADMINISTRADOR`.
+
+### Response 204
+
+Sem corpo.
+
+### Geracao automatica de minuta
+
+Quando um processo chega ao status `APROVADO`, o sistema busca o `TemplateContrato` ativo mais recente, renderiza `conteudo_html` com os dados reais do prestador e salva um PDF em `MinutaContrato`.
+
+Variaveis suportadas no template:
+
+- `{{ razao_social }}`
+- `{{ nome_fantasia }}`
+- `{{ cnpj }}`
+- `{{ endereco }}`
+- `{{ nome_responsavel }}`
+- `{{ email }}`
+- `{{ telefone }}`
+- `{{ processo_id }}`
+
+Depois da geracao, o processo muda para `MINUTA_GERADA` e o historico recebe o evento `Minuta gerada`. Se nao houver template ativo, o processo permanece `APROVADO` e nenhuma minuta e criada.
+
 ### Observabilidade das Configuracoes
 
 Mudancas administrativas registram logs estruturados com `actor_id`, estado anterior e novo estado quando aplicavel:
@@ -990,6 +1122,9 @@ Mudancas administrativas registram logs estruturados com `actor_id`, estado ante
 - `config_approval_flow_created`
 - `config_approval_flow_updated`
 - `config_approval_flow_deactivated`
+- `config_contract_template_created`
+- `config_contract_template_versioned`
+- `config_contract_template_deactivated`
 
 ### Respostas de Permissao
 
@@ -1272,6 +1407,39 @@ Regras:
 | `configuracao` | Configuracao de fluxo vinculada |
 | `aprovador` | Usuario da equipe administrativa que aprovara nessa posicao |
 | `ordem` | Ordem sequencial da etapa |
+
+### TemplateContrato
+
+| Campo | Descricao |
+| --- | --- |
+| `nome` | Nome administrativo do template |
+| `conteudo_html` | HTML com variaveis renderizadas pela engine de templates do Django |
+| `ativo` | Indica se a versao pode ser usada para novas minutas |
+| `versao` | Numero da versao do template |
+| `template_anterior` | Versao anterior quando criada por edicao de template ativo |
+| `criado_em` | Data de criacao |
+| `atualizado_em` | Data da ultima atualizacao |
+
+Regras:
+
+- Editar um template ativo cria uma nova versao e inativa a anterior.
+- Minutas ja geradas permanecem vinculadas a versao usada originalmente.
+- A API mantem apenas um template ativo por vez quando templates sao criados ou atualizados como ativos.
+
+### MinutaContrato
+
+| Campo | Descricao |
+| --- | --- |
+| `processo` | Processo de homologacao vinculado a minuta |
+| `template` | Template e versao usados na geracao |
+| `arquivo_pdf` | Arquivo PDF salvo em `media/minutas/` |
+| `gerado_em` | Data e hora da geracao |
+
+Regras:
+
+- Existe no maximo uma minuta por processo.
+- A minuta e gerada automaticamente quando o processo passa para `APROVADO` e existe template ativo.
+- Apos a geracao, o processo passa para `MINUTA_GERADA`.
 
 ## Permissoes
 

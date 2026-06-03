@@ -344,6 +344,53 @@ class EtapaConfiguracaoPadrao(models.Model):
         return f'{self.configuracao_id} - {self.ordem} - {self.aprovador.email}'
 
 
+class TemplateContrato(models.Model):
+    nome = models.CharField(max_length=150)
+    conteudo_html = models.TextField()
+    ativo = models.BooleanField(default=True)
+    versao = models.PositiveIntegerField(default=1)
+    template_anterior = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        related_name='proximas_versoes',
+        blank=True,
+        null=True,
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Template de Contrato'
+        verbose_name_plural = 'Templates de Contrato'
+        ordering = ('-ativo', '-versao', 'nome')
+
+    def __str__(self):
+        return f'{self.nome} v{self.versao}'
+
+
+class MinutaContrato(models.Model):
+    processo = models.OneToOneField(
+        ProcessoHomologacao,
+        on_delete=models.CASCADE,
+        related_name='minuta_contrato',
+    )
+    template = models.ForeignKey(
+        TemplateContrato,
+        on_delete=models.PROTECT,
+        related_name='minutas',
+    )
+    arquivo_pdf = models.FileField(upload_to='minutas/')
+    gerado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Minuta de Contrato'
+        verbose_name_plural = 'Minutas de Contrato'
+        ordering = ('-gerado_em',)
+
+    def __str__(self):
+        return f'Minuta do processo {self.processo_id}'
+
+
 class DocumentoPrestador(models.Model):
     class Status(models.TextChoices):
         ENVIADO = 'ENVIADO', _('Enviado')
