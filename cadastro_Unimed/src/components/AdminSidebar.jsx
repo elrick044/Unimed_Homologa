@@ -6,6 +6,7 @@ const navigation = [
   { name: "Usuários internos", to: "/admin/config/usuarios" },
   { name: "Tipos de documento", to: "/admin/config/documentos" },
   { name: "Fluxo de aprovação", to: "/admin/config/fluxo" },
+  { name: "Templates de contrato", to: "/admin/config/templates" },
 ];
 
 export default function AdminSidebar() {

@@ -19,6 +19,8 @@ from .models import (
     ParecerProcesso,
     PrestadorEmpresa,
     ProcessoHomologacao,
+    MinutaContrato,
+    TemplateContrato,
     TipoDocumento,
 )
 
@@ -816,3 +818,123 @@ class DocumentoUploadTests(APITestCase):
 
         self.assertIn('Contrato Social', nomes)
         self.assertNotIn('Documento Inativo', nomes)
+
+
+class MinutaContratoTests(APITestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.settings_override = override_settings(MEDIA_ROOT=self.media_root)
+        self.settings_override.enable()
+
+        self.admin_user = get_user_model().objects.create_user(
+            email='minuta-admin@example.com',
+            password='SenhaForte123',
+            perfil=get_user_model().Perfil.ADMINISTRADOR,
+        )
+        self.aprovador = get_user_model().objects.create_user(
+            email='minuta-aprovador@example.com',
+            password='SenhaForte123',
+            perfil=get_user_model().Perfil.EQUIPE_ADMINISTRATIVA,
+        )
+        self.prestador_user = get_user_model().objects.create_user(
+            email='minuta-prestador@example.com',
+            password='SenhaForte123',
+            perfil=get_user_model().Perfil.PRESTADOR,
+        )
+        self.prestador = PrestadorEmpresa.objects.create(
+            user=self.prestador_user,
+            razao_social='Clinica Minuta LTDA',
+            nome_fantasia='Clinica Minuta',
+            cnpj='12345678000190',
+            endereco='Rua da Minuta, 100',
+            nome_responsavel='Maria Minuta',
+            email='minuta-prestador@example.com',
+            telefone='11999999999',
+        )
+
+    def tearDown(self):
+        self.settings_override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def test_system_admin_can_create_and_version_contract_template(self):
+        auth_client(self.client, self.admin_user)
+
+        create_response = self.client.post(
+            reverse('admin-config-templates'),
+            {
+                'nome': 'Contrato Prestador',
+                'conteudo_html': '<p>Contrato de {{ razao_social }}</p>',
+                'ativo': True,
+            },
+            format='json',
+        )
+        template_id = create_response.data['id']
+
+        update_response = self.client.put(
+            reverse('admin-config-template-detail', kwargs={'id_template': template_id}),
+            {'conteudo_html': '<p>Contrato atualizado de {{ razao_social }}</p>'},
+            format='json',
+        )
+
+        template_original = TemplateContrato.objects.get(id=template_id)
+        novo_template = TemplateContrato.objects.get(id=update_response.data['id'])
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+        self.assertFalse(template_original.ativo)
+        self.assertTrue(novo_template.ativo)
+        self.assertEqual(novo_template.versao, 2)
+        self.assertEqual(novo_template.template_anterior, template_original)
+
+    def test_final_approval_generates_minuta_and_updates_process_status(self):
+        TemplateContrato.objects.create(
+            nome='Contrato Prestador',
+            conteudo_html='<html><body><h1>{{ razao_social }}</h1><p>CNPJ {{ cnpj }}</p></body></html>',
+            ativo=True,
+        )
+        processo = ProcessoHomologacao.objects.create(
+            prestador=self.prestador,
+            status=ProcessoHomologacao.Status.EM_APROVACAO_INTERNA,
+        )
+        auth_client(self.client, self.aprovador)
+
+        response = self.client.post(
+            reverse('admin-processo-parecer', kwargs={'id_processo': processo.id}),
+            {'decisao': ParecerProcesso.Decisao.APROVADO},
+            format='json',
+        )
+
+        processo.refresh_from_db()
+        minuta = MinutaContrato.objects.get(processo=processo)
+        with minuta.arquivo_pdf.open('rb') as arquivo:
+            pdf_bytes = arquivo.read()
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(processo.status, ProcessoHomologacao.Status.MINUTA_GERADA)
+        self.assertTrue(minuta.arquivo_pdf.name.endswith('.pdf'))
+        self.assertIn(b'%PDF', pdf_bytes[:20])
+        self.assertNotIn(b'{{ razao_social }}', pdf_bytes)
+        self.assertNotIn(b'<p>', pdf_bytes)
+        self.assertTrue(processo.historico.filter(acao='Minuta gerada').exists())
+
+    def test_process_owner_can_download_generated_minuta(self):
+        template = TemplateContrato.objects.create(
+            nome='Contrato Prestador',
+            conteudo_html='<p>Contrato de {{ razao_social }}</p>',
+            ativo=True,
+        )
+        processo = ProcessoHomologacao.objects.create(prestador=self.prestador)
+        minuta = MinutaContrato(processo=processo, template=template)
+        minuta.arquivo_pdf.save(
+            'minuta_teste.pdf',
+            SimpleUploadedFile('minuta_teste.pdf', b'%PDF-1.4 minuta teste', content_type='application/pdf'),
+            save=True,
+        )
+        auth_client(self.client, self.prestador_user)
+
+        response = self.client.get(reverse('processo-minuta-download', kwargs={'id_processo': processo.id}))
+        content = b''.join(response.streaming_content)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertIn(b'%PDF-1.4', content)

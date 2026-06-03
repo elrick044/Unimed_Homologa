@@ -10,6 +10,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { Link, useOutletContext, useParams } from "react-router-dom";
 import { API_URL, api } from "../config/api";
+import { downloadBlob } from "../utils/downloadFile";
 
 const documentStatusLabels = {
   ENVIADO: "Enviado",
@@ -391,6 +392,8 @@ export default function AdminProcessoDetalhe() {
   const [parecerObservacoes, setParecerObservacoes] = useState("");
   const [parecerError, setParecerError] = useState("");
   const [isSubmittingParecer, setIsSubmittingParecer] = useState(false);
+  const [isDownloadingMinuta, setIsDownloadingMinuta] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
 
   const loadProcessoDetalhe = useCallback(async () => {
     setIsLoading(true);
@@ -456,6 +459,25 @@ export default function AdminProcessoDetalhe() {
     }
   };
 
+  const downloadMinuta = async () => {
+    if (!processo?.id) return;
+
+    setDownloadError("");
+    setIsDownloadingMinuta(true);
+
+    try {
+      const response = await api.get(`/processos/${processo.id}/minuta/download/`, {
+        responseType: "blob",
+      });
+
+      downloadBlob(response.data, `minuta_processo_${processo.id}.pdf`);
+    } catch (error) {
+      setDownloadError(error.response?.data?.detail || "Nao foi possivel baixar a minuta.");
+    } finally {
+      setIsDownloadingMinuta(false);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-10 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-6xl">
@@ -474,6 +496,35 @@ export default function AdminProcessoDetalhe() {
             </p>
           </div>
         </header>
+
+        {processo?.minuta_contrato?.arquivo_pdf && !isLoading && !errorMessage && (
+          <section className="mb-6 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-950">Minuta de contrato</h2>
+                <p className="mt-1 text-sm text-gray-600">
+                  Minuta gerada em {formatDate(processo.minuta_contrato.gerado_em)} com o template "{processo.minuta_contrato.template_nome}".
+                </p>
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <button
+                  type="button"
+                  onClick={downloadMinuta}
+                  disabled={isDownloadingMinuta}
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#006F46] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#00583C] disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {isDownloadingMinuta ? <ArrowPathIcon className="h-4 w-4 animate-spin" /> : <ArrowDownTrayIcon className="h-4 w-4" />}
+                  Baixar minuta
+                </button>
+              </div>
+            </div>
+            {downloadError && (
+              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {downloadError}
+              </div>
+            )}
+          </section>
+        )}
 
         {isLoading ? (
           <section className="rounded-lg border border-gray-200 bg-white p-6 text-sm font-medium text-gray-600 shadow-sm">

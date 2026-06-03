@@ -1,8 +1,122 @@
+import re
+
+from django.core.files.base import ContentFile
 from django.db import transaction
+from django.template import Context, Template
+from django.utils.html import strip_tags
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
-from .models import ConfiguracaoFluxoPadrao, EtapaAprovacao, FluxoAprovacao, ParecerProcesso, ProcessoHomologacao, User
+from .models import (
+    ConfiguracaoFluxoPadrao,
+    EtapaAprovacao,
+    FluxoAprovacao,
+    MinutaContrato,
+    ParecerProcesso,
+    ProcessoHomologacao,
+    TemplateContrato,
+    User,
+)
+
+
+def _escape_pdf_text(value):
+    return (value or '').replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
+
+
+def _build_simple_pdf(text):
+    lines = [line.strip() for line in re.split(r'[\r\n]+', text or '') if line.strip()]
+    if not lines:
+        lines = ['Minuta de contrato']
+
+    content_lines = ['BT', '/F1 11 Tf', '72 760 Td', '14 TL']
+    for index, line in enumerate(lines[:48]):
+        if index:
+            content_lines.append('T*')
+        content_lines.append(f'({_escape_pdf_text(line[:110])}) Tj')
+    content_lines.append('ET')
+    stream = '\n'.join(content_lines).encode('latin-1', errors='replace')
+
+    objects = [
+        b'<< /Type /Catalog /Pages 2 0 R >>',
+        b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+        b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+        b'<< /Length ' + str(len(stream)).encode('ascii') + b' >>\nstream\n' + stream + b'\nendstream',
+    ]
+
+    pdf = bytearray(b'%PDF-1.4\n')
+    offsets = [0]
+    for index, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f'{index} 0 obj\n'.encode('ascii'))
+        pdf.extend(obj)
+        pdf.extend(b'\nendobj\n')
+
+    xref_offset = len(pdf)
+    pdf.extend(f'xref\n0 {len(objects) + 1}\n'.encode('ascii'))
+    pdf.extend(b'0000000000 65535 f \n')
+    for offset in offsets[1:]:
+        pdf.extend(f'{offset:010d} 00000 n \n'.encode('ascii'))
+    pdf.extend(
+        f'trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n'.encode('ascii')
+    )
+    return bytes(pdf)
+
+
+def renderizar_html_para_pdf(conteudo_html):
+    try:
+        from weasyprint import HTML
+    except ImportError:
+        texto = strip_tags(conteudo_html).replace('&nbsp;', ' ')
+        return _build_simple_pdf(texto)
+
+    return HTML(string=conteudo_html).write_pdf()
+
+
+@transaction.atomic
+def gerar_minuta_para_processo(processo):
+    if processo.status != ProcessoHomologacao.Status.APROVADO:
+        return None
+
+    if MinutaContrato.objects.filter(processo=processo).exists():
+        return processo.minuta_contrato
+
+    template = TemplateContrato.objects.filter(ativo=True).order_by('-versao', '-atualizado_em').first()
+    if not template:
+        return None
+
+    prestador = processo.prestador
+    contexto = {
+        'razao_social': prestador.razao_social,
+        'nome_fantasia': prestador.nome_fantasia,
+        'cnpj': prestador.cnpj,
+        'endereco': prestador.endereco,
+        'nome_responsavel': prestador.nome_responsavel,
+        'email': prestador.email,
+        'telefone': prestador.telefone,
+        'processo_id': processo.id,
+    }
+    html_renderizado = Template(template.conteudo_html).render(Context(contexto))
+    pdf = renderizar_html_para_pdf(html_renderizado)
+
+    minuta = MinutaContrato(processo=processo, template=template)
+    minuta.arquivo_pdf.save(f'minuta_processo_{processo.id}.pdf', ContentFile(pdf), save=True)
+
+    status_anterior = processo.status
+    processo.status = ProcessoHomologacao.Status.MINUTA_GERADA
+    processo.save(update_fields=('status', 'atualizado_em'))
+    processo.registrar_evento(
+        acao='Minuta gerada',
+        descricao='Minuta de contrato gerada automaticamente apos aprovacao final.',
+        metadados={
+            'status_anterior': status_anterior,
+            'status_atual': processo.status,
+            'template_id': template.id,
+            'template_versao': template.versao,
+            'minuta_id': minuta.id,
+        },
+    )
+    return minuta
 
 
 def get_aprovadores_padrao():

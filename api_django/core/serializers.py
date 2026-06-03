@@ -12,9 +12,11 @@ from .models import (
     EtapaAprovacao,
     FluxoAprovacao,
     HistoricoProcesso,
+    MinutaContrato,
     ParecerProcesso,
     PrestadorEmpresa,
     ProcessoHomologacao,
+    TemplateContrato,
     TipoDocumento,
     User,
 )
@@ -407,6 +409,67 @@ class ConfiguracaoFluxoPadraoSerializer(serializers.ModelSerializer):
             ConfiguracaoFluxoPadrao.objects.exclude(id=configuracao.id).update(ativo=False)
 
 
+class TemplateContratoSerializer(serializers.ModelSerializer):
+    template_anterior = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = TemplateContrato
+        fields = (
+            'id',
+            'nome',
+            'conteudo_html',
+            'ativo',
+            'versao',
+            'template_anterior',
+            'criado_em',
+            'atualizado_em',
+        )
+        read_only_fields = ('id', 'versao', 'template_anterior', 'criado_em', 'atualizado_em')
+
+    @transaction.atomic
+    def create(self, validated_data):
+        template = TemplateContrato.objects.create(**validated_data)
+        self._ensure_single_active(template)
+        return template
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        if instance.ativo:
+            novo_template = TemplateContrato.objects.create(
+                nome=validated_data.get('nome', instance.nome),
+                conteudo_html=validated_data.get('conteudo_html', instance.conteudo_html),
+                ativo=validated_data.get('ativo', True),
+                versao=instance.versao + 1,
+                template_anterior=instance,
+            )
+            instance.ativo = False
+            instance.save(update_fields=('ativo', 'atualizado_em'))
+            self._ensure_single_active(novo_template)
+            return novo_template
+
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        instance.save()
+        self._ensure_single_active(instance)
+        return instance
+
+    def _ensure_single_active(self, template):
+        if template.ativo:
+            TemplateContrato.objects.exclude(id=template.id).update(ativo=False)
+
+
+class MinutaContratoSerializer(serializers.ModelSerializer):
+    template_id = serializers.IntegerField(source='template.id', read_only=True)
+    template_nome = serializers.CharField(source='template.nome', read_only=True)
+    template_versao = serializers.IntegerField(source='template.versao', read_only=True)
+    arquivo_pdf = serializers.FileField(read_only=True)
+
+    class Meta:
+        model = MinutaContrato
+        fields = ('id', 'template_id', 'template_nome', 'template_versao', 'arquivo_pdf', 'gerado_em')
+        read_only_fields = fields
+
+
 class ProcessoHomologacaoResumoSerializer(serializers.ModelSerializer):
     prestador = PrestadorEmpresaSerializer(read_only=True)
     status_atual = serializers.CharField(source='status', read_only=True)
@@ -415,6 +478,7 @@ class ProcessoHomologacaoResumoSerializer(serializers.ModelSerializer):
     historico = HistoricoProcessoSerializer(many=True, read_only=True)
     fluxo_aprovacao = FluxoAprovacaoSerializer(read_only=True)
     pareceres = ParecerProcessoSerializer(many=True, read_only=True)
+    minuta_contrato = MinutaContratoSerializer(read_only=True)
 
     class Meta:
         model = ProcessoHomologacao
@@ -430,6 +494,7 @@ class ProcessoHomologacaoResumoSerializer(serializers.ModelSerializer):
             'historico',
             'fluxo_aprovacao',
             'pareceres',
+            'minuta_contrato',
         )
         read_only_fields = fields
 

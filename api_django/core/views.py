@@ -2,6 +2,7 @@ import json
 import logging
 
 from django.db import transaction
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
@@ -12,7 +13,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import ConfiguracaoFluxoPadrao, DocumentoPrestador, ParecerProcesso, ProcessoHomologacao, TipoDocumento, User
+from .models import ConfiguracaoFluxoPadrao, DocumentoPrestador, ParecerProcesso, ProcessoHomologacao, TemplateContrato, TipoDocumento, User
 from .permissions import CanAccessProcess, IsAdministrativeTeam, IsSystemAdmin
 from .serializers import (
     ConfiguracaoFluxoPadraoSerializer,
@@ -26,6 +27,7 @@ from .serializers import (
     PrestadorRegisterSerializer,
     ProcessoHomologacaoListSerializer,
     ProcessoHomologacaoResumoSerializer,
+    TemplateContratoSerializer,
     TipoDocumentoConfigSerializer,
     TipoDocumentoSerializer,
     UsuarioInternoConfigSerializer,
@@ -320,6 +322,25 @@ class ProcessoDocumentoListView(APIView):
         return Response(
             {'processo': processo.id, 'documentos': DocumentoPrestadorHistoricoSerializer(grupos, many=True).data},
             status=status.HTTP_200_OK,
+        )
+
+
+class ProcessoMinutaDownloadView(APIView):
+    permission_classes = (IsAuthenticated, CanAccessProcess)
+
+    def get(self, request, id_processo):
+        processo = get_object_or_404(ProcessoHomologacao, id=id_processo)
+        self.check_object_permissions(request, processo)
+
+        minuta = getattr(processo, 'minuta_contrato', None)
+        if not minuta or not minuta.arquivo_pdf:
+            raise Http404('Minuta nao encontrada para este processo.')
+
+        return FileResponse(
+            minuta.arquivo_pdf.open('rb'),
+            as_attachment=True,
+            filename=f'minuta_processo_{processo.id}.pdf',
+            content_type='application/pdf',
         )
 
 
@@ -711,6 +732,71 @@ class AdminConfigFluxoDetailView(APIView):
             'config_approval_flow_deactivated',
             actor_id=request.user.id,
             flow_config_id=fluxo.id,
+            previous_state=previous_state,
+            new_state=new_state,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class AdminConfigTemplateListCreateView(APIView):
+    permission_classes = (IsAuthenticated, IsSystemAdmin)
+
+    def get(self, request):
+        templates = TemplateContrato.objects.all().order_by('-ativo', '-versao', 'nome')
+        return Response(
+            {'templates': TemplateContratoSerializer(templates, many=True).data},
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request):
+        serializer = TemplateContratoSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        template = serializer.save()
+        log_config_event(
+            'config_contract_template_created',
+            actor_id=request.user.id,
+            template_id=template.id,
+            new_state=TemplateContratoSerializer(template).data,
+        )
+        return Response(TemplateContratoSerializer(template).data, status=status.HTTP_201_CREATED)
+
+
+class AdminConfigTemplateDetailView(APIView):
+    permission_classes = (IsAuthenticated, IsSystemAdmin)
+
+    def get_object(self, id_template):
+        return get_object_or_404(TemplateContrato, id=id_template)
+
+    def get(self, request, id_template):
+        template = self.get_object(id_template)
+        return Response(TemplateContratoSerializer(template).data, status=status.HTTP_200_OK)
+
+    def put(self, request, id_template):
+        template = self.get_object(id_template)
+        previous_state = TemplateContratoSerializer(template).data
+        serializer = TemplateContratoSerializer(template, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        novo_template = serializer.save()
+        new_state = TemplateContratoSerializer(novo_template).data
+        log_config_event(
+            'config_contract_template_versioned',
+            actor_id=request.user.id,
+            template_id=novo_template.id,
+            previous_state=previous_state,
+            new_state=new_state,
+        )
+        return Response(new_state, status=status.HTTP_200_OK)
+
+    def delete(self, request, id_template):
+        template = self.get_object(id_template)
+        previous_state = TemplateContratoSerializer(template).data
+        template.ativo = False
+        template.save(update_fields=('ativo', 'atualizado_em'))
+        new_state = TemplateContratoSerializer(template).data
+        log_config_event(
+            'config_contract_template_deactivated',
+            actor_id=request.user.id,
+            template_id=template.id,
             previous_state=previous_state,
             new_state=new_state,
         )

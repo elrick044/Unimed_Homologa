@@ -8,9 +8,11 @@ from .models import (
     EtapaAprovacao,
     FluxoAprovacao,
     HistoricoProcesso,
+    MinutaContrato,
     ParecerProcesso,
     PrestadorEmpresa,
     ProcessoHomologacao,
+    TemplateContrato,
     TipoDocumento,
     User,
 )
@@ -121,3 +123,17 @@ class ConfiguracaoFluxoPadraoAdmin(admin.ModelAdmin):
 class EtapaConfiguracaoPadraoAdmin(admin.ModelAdmin):
     list_display = ('configuracao', 'ordem', 'aprovador')
     search_fields = ('configuracao__nome', 'aprovador__email')
+
+
+@admin.register(TemplateContrato)
+class TemplateContratoAdmin(admin.ModelAdmin):
+    list_display = ('nome', 'versao', 'ativo', 'template_anterior', 'criado_em', 'atualizado_em')
+    list_filter = ('ativo', 'versao')
+    search_fields = ('nome', 'conteudo_html')
+
+
+@admin.register(MinutaContrato)
+class MinutaContratoAdmin(admin.ModelAdmin):
+    list_display = ('processo', 'template', 'gerado_em')
+    list_filter = ('gerado_em', 'template')
+    search_fields = ('processo__prestador__razao_social', 'processo__prestador__cnpj', 'template__nome')
