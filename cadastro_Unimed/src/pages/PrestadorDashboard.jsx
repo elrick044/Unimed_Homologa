@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowPathIcon,
+  ArrowDownTrayIcon,
   ArrowRightOnRectangleIcon,
   CheckCircleIcon,
   ClockIcon,
@@ -11,6 +12,7 @@ import { useNavigate, useOutletContext } from "react-router-dom";
 import { clearSession } from "../auth/session";
 import DocumentoUpload from "../components/DocumentoUpload";
 import { api } from "../config/api";
+import { downloadBlob } from "../utils/downloadFile";
 
 const statusLabels = {
   CADASTRO_INICIADO: "Cadastro iniciado",
@@ -148,6 +150,8 @@ export default function PrestadorDashboard() {
   const [processo, setProcesso] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+  const [isDownloadingMinuta, setIsDownloadingMinuta] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
 
   const logout = () => {
     clearSession();
@@ -171,6 +175,24 @@ export default function PrestadorDashboard() {
   useEffect(() => {
     loadProcesso();
   }, [loadProcesso]);
+
+  const downloadMinuta = async () => {
+    if (!processo?.id) return;
+
+    setDownloadError("");
+    setIsDownloadingMinuta(true);
+
+    try {
+      const response = await api.get(`/processos/${processo.id}/minuta/download/`, {
+        responseType: "blob",
+      });
+      downloadBlob(response.data, `minuta_processo_${processo.id}.pdf`);
+    } catch (error) {
+      setDownloadError(error.response?.data?.detail || "Nao foi possivel baixar a minuta.");
+    } finally {
+      setIsDownloadingMinuta(false);
+    }
+  };
 
   const documentosEnviados = useMemo(() => processo?.documentos_enviados || [], [processo]);
   const pendencias = useMemo(() => processo?.pendencias || [], [processo]);
@@ -307,6 +329,35 @@ export default function PrestadorDashboard() {
                 </div>
               </div>
             </section>
+
+            {processo?.minuta_contrato?.arquivo_pdf && (
+              <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-950">Minuta gerada</h2>
+                    <p className="mt-1 text-sm text-gray-600">
+                      Baixe o contrato PDF gerado para este processo.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={downloadMinuta}
+                    disabled={isDownloadingMinuta}
+                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#006F46] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#00583C] disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {isDownloadingMinuta ? <ArrowPathIcon className="h-4 w-4 animate-spin" /> : <ArrowDownTrayIcon className="h-4 w-4" />}
+                    Baixar minuta
+                  </button>
+                </div>
+
+                {downloadError && (
+                  <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    {downloadError}
+                  </div>
+                )}
+              </section>
+            )}
 
             <section className="grid gap-6 lg:grid-cols-2">
               <DocumentStatusSection
