@@ -11,7 +11,7 @@ export default function Layout() {
   return (
     <>
       <Navbar />
-      <div className="pt-24 bg-slate-50">
+      <div className="pt-8 bg-slate-50">
         {location.pathname === "/" ? (
           <main className="min-h-screen">
             <Outlet />
