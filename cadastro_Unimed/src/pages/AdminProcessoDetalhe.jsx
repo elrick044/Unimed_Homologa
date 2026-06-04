@@ -491,9 +491,19 @@ export default function AdminProcessoDetalhe() {
               Voltar para processos
             </Link>
             <h1 className="text-3xl font-semibold text-gray-950">Validacao de documentos</h1>
-            <p className="mt-2 text-sm text-gray-600">
-              Processo #{id} com {totalPendingValidation} documento(s) aguardando acao da equipe.
-            </p>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+              <p className="text-sm text-gray-600">
+                Processo #{id} com {totalPendingValidation} documento(s) aguardando acao da equipe.
+              </p>
+              {processo?.prestador && (
+                <div className="rounded-2xl border border-gray-200 bg-slate-50 px-4 py-3 text-sm text-gray-700">
+                  <p className="font-semibold text-gray-950">Empresa</p>
+                  <p>{processo.prestador.razao_social || processo.prestador.nome}</p>
+                  {processo.prestador.cnpj && <p className="text-gray-500">CNPJ {processo.prestador.cnpj}</p>}
+                  {processo.prestador.email && <p className="text-gray-500">Email {processo.prestador.email}</p>}
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
