@@ -78,6 +78,20 @@ function formatFileSize(bytes) {
   return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
+function getDocumentFileName(documento) {
+  const filePath = documento?.arquivo_nome || documento?.nome_arquivo || documento?.nome || documento?.arquivo;
+
+  if (!filePath) return "-";
+
+  const fileName = String(filePath).split(/[\\/]/).filter(Boolean).pop();
+
+  try {
+    return decodeURIComponent(fileName || filePath);
+  } catch {
+    return fileName || filePath;
+  }
+}
+
 function StatusBadge({ status }) {
   return (
     <span
@@ -100,9 +114,15 @@ function DocumentCard({ item }) {
           <p className="font-semibold text-gray-950">{item.tipo_documento?.nome || "Documento"}</p>
           {item.tipo_documento?.descricao && <p className="mt-1 text-sm text-gray-600">{item.tipo_documento.descricao}</p>}
           {document && (
-            <p className="mt-2 text-sm text-gray-500">
-              {formatFileSize(document.tamanho_bytes)} - versao {document.versao || 1} - {formatDate(document.enviado_em)}
-            </p>
+            <div className="mt-2 space-y-1 text-sm">
+              <p className="text-gray-600">
+                <span className="font-medium text-gray-700">Nome do arquivo:</span>{" "}
+                <span className="break-all">{getDocumentFileName(document)}</span>
+              </p>
+              <p className="text-gray-500">
+                {formatFileSize(document.tamanho_bytes)} - versao {document.versao || 1} - {formatDate(document.enviado_em)}
+              </p>
+            </div>
           )}
         </div>
         <StatusBadge status={item.status} />

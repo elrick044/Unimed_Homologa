@@ -3,9 +3,9 @@ import { getStoredUser } from "../auth/session";
 
 const navigation = [
   { name: "Processos", to: "/admin/processos" },
-  { name: "Usuários internos", to: "/admin/config/usuarios" },
+  { name: "Usuarios internos", to: "/admin/config/usuarios" },
   { name: "Tipos de documento", to: "/admin/config/documentos" },
-  { name: "Fluxo de aprovação", to: "/admin/config/fluxo" },
+  { name: "Fluxo de aprovacao", to: "/admin/config/fluxo" },
   { name: "Templates de contrato", to: "/admin/config/templates" },
 ];
 
@@ -21,8 +21,8 @@ export default function AdminSidebar() {
     <aside className="sticky top-24 hidden h-[calc(100vh-6rem)] shrink-0 overflow-y-auto rounded-3xl border border-gray-200 bg-white p-6 shadow-sm lg:block">
       <div className="space-y-4">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-gray-500">Configurações</p>
-          <p className="mt-3 text-sm text-gray-600">Gerencie usuários, documentos e o fluxo de aprovação padrão.</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-gray-500">Configuracoes</p>
+          <p className="mt-3 text-sm text-gray-600">Gerencie usuarios, documentos, templates e o fluxo padrao.</p>
         </div>
         <nav className="space-y-2">
           {navigation.map((item) => {
