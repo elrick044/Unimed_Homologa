@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowPathIcon,
   CheckCircleIcon,
-  CloudArrowUpIcon,
   DocumentTextIcon,
   ExclamationTriangleIcon,
   TrashIcon,
@@ -51,7 +50,6 @@ export default function DocumentoUpload({
   const inputRefs = useRef({});
   const [apiDocumentTypes, setApiDocumentTypes] = useState(DEFAULT_DOCUMENT_TYPES);
   const [filesByTypeId, setFilesByTypeId] = useState({});
-  const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [feedback, setFeedback] = useState(null);
@@ -127,43 +125,6 @@ export default function DocumentoUpload({
     setFeedback(null);
   };
 
-  const addDroppedFiles = (fileList) => {
-    if (disabled || isUploading || documentTypes.length === 0) return;
-
-    const incomingFiles = Array.from(fileList || []);
-    const pdfFiles = incomingFiles.filter(isPdf);
-    const rejectedFiles = incomingFiles.filter((file) => !isPdf(file));
-
-    if (rejectedFiles.length) {
-      setFeedback({
-        type: "error",
-        message: "Apenas arquivos PDF podem ser selecionados.",
-      });
-    }
-
-    if (!pdfFiles.length) return;
-
-    setFilesByTypeId((currentFiles) => {
-      const nextFiles = { ...currentFiles };
-      const availableTypes = documentTypes.filter((type) => !nextFiles[String(type.id)]);
-
-      pdfFiles.slice(0, availableTypes.length).forEach((file, index) => {
-        nextFiles[String(availableTypes[index].id)] = file;
-      });
-
-      return nextFiles;
-    });
-
-    setFeedback(
-      pdfFiles.length > documentTypes.length
-        ? {
-            type: "error",
-            message: "Alguns arquivos nao foram adicionados porque nao havia campos livres.",
-          }
-        : null,
-    );
-  };
-
   const removeFile = (typeId) => {
     setFilesByTypeId((currentFiles) => {
       const nextFiles = { ...currentFiles };
@@ -225,12 +186,6 @@ export default function DocumentoUpload({
     }
   };
 
-  const handleDrop = (event) => {
-    event.preventDefault();
-    setIsDragging(false);
-    addDroppedFiles(event.dataTransfer.files);
-  };
-
   return (
     <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm sm:p-6 lg:p-8">
       <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -245,29 +200,6 @@ export default function DocumentoUpload({
       </div>
 
       <form onSubmit={submitUpload} className="space-y-6">
-        <div
-          onDragEnter={(event) => {
-            event.preventDefault();
-            setIsDragging(true);
-          }}
-          onDragOver={(event) => {
-            event.preventDefault();
-            setIsDragging(true);
-          }}
-          onDragLeave={(event) => {
-            event.preventDefault();
-            setIsDragging(false);
-          }}
-          onDrop={handleDrop}
-          className={`flex min-h-52 flex-col items-center justify-center rounded-lg border-2 border-dashed px-6 py-10 text-center transition ${
-            isDragging ? "border-[#009966] bg-emerald-50" : "border-gray-300 bg-slate-50"
-          }`}
-        >
-          <CloudArrowUpIcon className="h-12 w-12 text-[#006F46]" />
-          <p className="mt-4 text-base font-semibold text-gray-900">Solte os PDFs aqui</p>
-          <p className="mt-1 text-sm text-gray-600">ou use o campo de arquivo de cada documento abaixo</p>
-        </div>
-
         {documentTypes.length > 0 && (
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
             <div className="border-b border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700">
