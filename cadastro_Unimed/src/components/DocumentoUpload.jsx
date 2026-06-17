@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowPathIcon,
   CheckCircleIcon,
-  CloudArrowUpIcon,
   DocumentTextIcon,
   ExclamationTriangleIcon,
   TrashIcon,
@@ -48,10 +47,9 @@ export default function DocumentoUpload({
   hiddenTypeIds = EMPTY_TYPE_IDS,
   onUploadSuccess,
 }) {
-  const inputRef = useRef(null);
+  const inputRefs = useRef({});
   const [apiDocumentTypes, setApiDocumentTypes] = useState(DEFAULT_DOCUMENT_TYPES);
-  const [selectedFiles, setSelectedFiles] = useState([]);
-  const [isDragging, setIsDragging] = useState(false);
+  const [filesByTypeId, setFilesByTypeId] = useState({});
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [feedback, setFeedback] = useState(null);
@@ -70,9 +68,8 @@ export default function DocumentoUpload({
     () =>
       !disabled &&
       documentTypes.length > 0 &&
-      selectedFiles.length > 0 &&
-      selectedFiles.every((item) => item.tipoDocumentoId),
-    [disabled, documentTypes.length, selectedFiles],
+      Object.values(filesByTypeId).some((file) => Boolean(file)),
+    [disabled, documentTypes.length, filesByTypeId],
   );
 
   useEffect(() => {
@@ -101,52 +98,43 @@ export default function DocumentoUpload({
   }, [disabled, providedDocumentTypes]);
 
   useEffect(() => {
-    setSelectedFiles((currentFiles) =>
-      currentFiles
-        .filter((item) => documentTypes.some((type) => String(type.id) === String(item.tipoDocumentoId)))
-        .map((item) => ({
-          ...item,
-          tipoDocumentoId: item.tipoDocumentoId || documentTypes[0]?.id || "",
-        })),
+    const validTypeIds = new Set(documentTypes.map((type) => String(type.id)));
+
+    setFilesByTypeId((currentFiles) =>
+      Object.fromEntries(
+        Object.entries(currentFiles).filter(([typeId]) => validTypeIds.has(String(typeId))),
+      ),
     );
   }, [documentTypes]);
 
-  const addFiles = (fileList) => {
-    if (disabled || isUploading || documentTypes.length === 0) return;
+  const selectFileForType = (typeId, file) => {
+    if (disabled || isUploading || !file) return;
 
-    const incomingFiles = Array.from(fileList || []);
-    const pdfFiles = incomingFiles.filter(isPdf);
-    const rejectedFiles = incomingFiles.filter((file) => !isPdf(file));
-
-    if (rejectedFiles.length) {
+    if (!isPdf(file)) {
       setFeedback({
         type: "error",
         message: "Apenas arquivos PDF podem ser selecionados.",
       });
-    } else {
-      setFeedback(null);
+      return;
     }
 
-    if (!pdfFiles.length) return;
-
-    setSelectedFiles((currentFiles) => [
+    setFilesByTypeId((currentFiles) => ({
       ...currentFiles,
-      ...pdfFiles.map((file) => ({
-        id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
-        file,
-        tipoDocumentoId: documentTypes[0]?.id || "",
-      })),
-    ]);
+      [String(typeId)]: file,
+    }));
+    setFeedback(null);
   };
 
-  const removeFile = (fileId) => {
-    setSelectedFiles((currentFiles) => currentFiles.filter((item) => item.id !== fileId));
-  };
+  const removeFile = (typeId) => {
+    setFilesByTypeId((currentFiles) => {
+      const nextFiles = { ...currentFiles };
+      delete nextFiles[String(typeId)];
+      return nextFiles;
+    });
 
-  const updateDocumentType = (fileId, tipoDocumentoId) => {
-    setSelectedFiles((currentFiles) =>
-      currentFiles.map((item) => (item.id === fileId ? { ...item, tipoDocumentoId } : item)),
-    );
+    if (inputRefs.current[String(typeId)]) {
+      inputRefs.current[String(typeId)].value = "";
+    }
   };
 
   const submitUpload = async (event) => {
@@ -155,9 +143,13 @@ export default function DocumentoUpload({
     if (!canSubmit || isUploading || disabled) return;
 
     const formData = new FormData();
-    selectedFiles.forEach((item) => {
-      formData.append("arquivos", item.file);
-      formData.append("tipos_documento", item.tipoDocumentoId);
+    documentTypes.forEach((type) => {
+      const file = filesByTypeId[String(type.id)];
+
+      if (file) {
+        formData.append("arquivos", file);
+        formData.append("tipos_documento", type.id);
+      }
     });
 
     setIsUploading(true);
@@ -173,7 +165,7 @@ export default function DocumentoUpload({
       });
 
       setUploadedDocuments(data.documentos || []);
-      setSelectedFiles([]);
+      setFilesByTypeId({});
       setUploadProgress(100);
       setFeedback({
         type: "success",
@@ -181,9 +173,9 @@ export default function DocumentoUpload({
       });
       onUploadSuccess?.(data.documentos || []);
 
-      if (inputRef.current) {
-        inputRef.current.value = "";
-      }
+      Object.values(inputRefs.current).forEach((input) => {
+        if (input) input.value = "";
+      });
     } catch (error) {
       setFeedback({
         type: "error",
@@ -194,12 +186,6 @@ export default function DocumentoUpload({
     }
   };
 
-  const handleDrop = (event) => {
-    event.preventDefault();
-    setIsDragging(false);
-    addFiles(event.dataTransfer.files);
-  };
-
   return (
     <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm sm:p-6 lg:p-8">
       <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -207,92 +193,61 @@ export default function DocumentoUpload({
           <h2 className="text-xl font-semibold text-gray-950">Envio de documentos</h2>
           <p className="mt-1 text-sm text-gray-600">
             {documentTypes.length
-              ? "Selecione os PDFs exigidos para a homologacao e confirme o envio."
+              ? "Anexe o PDF correspondente em cada documento exigido e confirme o envio."
               : "Nao ha novos tipos de documento pendentes para envio."}
           </p>
         </div>
       </div>
 
       <form onSubmit={submitUpload} className="space-y-6">
-        <div
-          onDragEnter={(event) => {
-            event.preventDefault();
-            setIsDragging(true);
-          }}
-          onDragOver={(event) => {
-            event.preventDefault();
-            setIsDragging(true);
-          }}
-          onDragLeave={(event) => {
-            event.preventDefault();
-            setIsDragging(false);
-          }}
-          onDrop={handleDrop}
-          className={`flex min-h-52 flex-col items-center justify-center rounded-lg border-2 border-dashed px-6 py-10 text-center transition ${
-            isDragging ? "border-[#009966] bg-emerald-50" : "border-gray-300 bg-slate-50"
-          }`}
-        >
-          <CloudArrowUpIcon className="h-12 w-12 text-[#006F46]" />
-          <p className="mt-4 text-base font-semibold text-gray-900">Solte os PDFs aqui</p>
-          <p className="mt-1 text-sm text-gray-600">ou selecione multiplos arquivos no computador</p>
-          <input
-            ref={inputRef}
-            type="file"
-            accept="application/pdf,.pdf"
-            multiple
-            className="sr-only"
-            onChange={(event) => addFiles(event.target.files)}
-            disabled={isUploading || disabled || documentTypes.length === 0}
-          />
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            disabled={isUploading || disabled || documentTypes.length === 0}
-            className="mt-5 inline-flex min-h-11 items-center justify-center rounded-lg bg-[#006F46] px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#00583C] focus:outline-none focus:ring-2 focus:ring-[#009966] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            Selecionar PDFs
-          </button>
-        </div>
-
-        {selectedFiles.length > 0 && (
-          <div className="overflow-hidden rounded-lg border border-gray-200">
+        {documentTypes.length > 0 && (
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
             <div className="border-b border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700">
-              Arquivos selecionados
+              Documentos para envio
             </div>
             <ul className="divide-y divide-gray-200">
-              {selectedFiles.map((item) => (
-                <li key={item.id} className="grid gap-3 px-4 py-4 md:grid-cols-[1fr_220px_auto] md:items-center">
+              {documentTypes.map((type) => {
+                const selectedFile = filesByTypeId[String(type.id)];
+
+                return (
+                <li key={type.id} className="grid gap-4 px-4 py-4 lg:grid-cols-[1fr_280px_auto] lg:items-center">
                   <div className="flex min-w-0 items-center gap-3">
                     <DocumentTextIcon className="h-6 w-6 shrink-0 text-[#006F46]" />
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-gray-900">{item.file.name}</p>
-                      <p className="text-sm text-gray-500">{formatFileSize(item.file.size)}</p>
+                      <p className="text-sm font-semibold text-gray-900">{type.nome}</p>
+                      {type.descricao && <p className="mt-1 text-sm text-gray-500">{type.descricao}</p>}
+                      {selectedFile && (
+                        <p className="mt-2 truncate text-sm text-gray-600">
+                          {selectedFile.name} - {formatFileSize(selectedFile.size)}
+                        </p>
+                      )}
                     </div>
                   </div>
-                  <select
-                    value={item.tipoDocumentoId}
-                    onChange={(event) => updateDocumentType(item.id, event.target.value)}
-                    disabled={isUploading || disabled}
-                    className="block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none transition focus:border-[#009966] focus:ring-2 focus:ring-[#009966]/20 disabled:cursor-not-allowed disabled:bg-gray-100"
-                    aria-label={`Tipo do documento ${item.file.name}`}
-                  >
-                    {documentTypes.map((type) => (
-                      <option key={type.id} value={type.id}>
-                        {type.nome}
-                      </option>
-                    ))}
-                  </select>
+                  <label className="block">
+                    <span className="sr-only">Arquivo para {type.nome}</span>
+                    <input
+                      ref={(input) => {
+                        inputRefs.current[String(type.id)] = input;
+                      }}
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      onChange={(event) => selectFileForType(type.id, event.target.files?.[0])}
+                      disabled={isUploading || disabled}
+                      className="block w-full text-sm text-gray-700 file:mr-4 file:min-h-10 file:rounded-lg file:border-0 file:bg-[#006F46] file:px-4 file:text-sm file:font-semibold file:text-white hover:file:bg-[#00583C] disabled:cursor-not-allowed disabled:opacity-70"
+                    />
+                  </label>
                   <button
                     type="button"
-                    onClick={() => removeFile(item.id)}
-                    disabled={isUploading || disabled}
+                    onClick={() => removeFile(type.id)}
+                    disabled={isUploading || disabled || !selectedFile}
                     className="inline-flex min-h-10 items-center justify-center rounded-lg px-3 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    aria-label={`Remover ${item.file.name}`}
+                    aria-label={`Remover arquivo de ${type.nome}`}
                   >
                     <TrashIcon className="h-5 w-5" />
                   </button>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </div>
         )}
