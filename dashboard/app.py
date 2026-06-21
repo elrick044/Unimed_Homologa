@@ -12,9 +12,9 @@ st.set_page_config(page_title="Unimed Dashboard", page_icon="📊", layout="wide
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "3306")
 DB_USER = os.getenv("DB_USER", "root")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "260405")
 DB_NAME = os.getenv("DB_NAME", "unimed")
-TABLE_NAME = os.getenv("TABLE_NAME", "cadastros")
+TABLE_NAME = os.getenv("TABLE_NAME", "submissions")
 
 ALLOWED_STATUS = ["Em análise", "Aprovado", "Reprovado"]
 
@@ -35,7 +35,7 @@ def get_distinct_statuses():
 # get_data agora aceita filtro
 @st.cache_data(ttl=60, show_spinner=False)
 def get_data(filter_statuses: list[str] | None = None):
-    base_sql = f"SELECT id, protocolo, razao_social, cnpj, setor, status FROM {TABLE_NAME}"
+    base_sql = f"SELECT id, protocolo, razao_social, cnpj, status FROM {TABLE_NAME}"
     params = {}
     if filter_statuses:
         ph = ", ".join([f":s{i}" for i, _ in enumerate(filter_statuses)])
